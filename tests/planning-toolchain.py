@@ -81,11 +81,19 @@ def main():
     # Listing succeeds, but actual compilation must reject this type error.
     (empty / "value.go").write_text("package sample\nvar Value int = false\n")
     run(["nix", "build", *flags, "--impure", "--no-link", "--expr", empty_expr], "empty-type-error", failure="cannot use false")
-    # An excluded directory takes the compiled go/build selector path.
-    (empty / "value.go").write_text("//go:build drvgo_excluded\n\npackage sample\n")
+    # The reusable selector must use this SDK's release tags, including when
+    # drvgo itself was built with a newer Go release.
+    version = run([sdk / "bin/go", "env", "GOVERSION"], "sdk-version")
+    next_minor = int(version.split(".")[1]) + 1
+    (empty / "value.go").write_text(f"//go:build go1.{next_minor}\n\npackage sample\n")
     marker = Path(run(["nix", "build", *flags, "--impure", "--no-link", "--print-out-paths", "--expr", empty_expr], "empty-excluded"))
     assert json.loads((marker / "nix-support/no-tests").read_text()) == {"version": 1, "status": "no-tests"}
     assert not (marker / "bin").exists()
+    # An invalid build constraint also takes the selector path. A cached
+    # no-tests marker must not turn a new selection error into a skip.
+    (empty / "value.go").write_text("//go:build (\n\npackage sample\n")
+    run(["nix", "build", *flags, "--impure", "--no-link", "--expr", empty_expr],
+        "empty-invalid-constraint", failure="//go:build")
     # A package without tests still needs its C code compiled and validated.
     native = 'package sample\n/* static int answer(void) { return 42; } */\nimport "C"\nfunc Value() int { return int(C.answer()) }\n'
     (empty / "value.go").write_text(native)

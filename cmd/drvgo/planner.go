@@ -62,7 +62,7 @@ func evaluatePlan(evaluator, mode string, args []string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	exportArgs := append([]string{"export", "-C", os.Getenv("src"), "-out", filepath.Join(tmp, "graph")}, args...)
+	exportArgs := append([]string{"internal-export", "-C", os.Getenv("src"), "-out", filepath.Join(tmp, "graph")}, args...)
 	export := exec.Command(self, exportArgs...)
 	export.Stdout, export.Stderr = os.Stdout, os.Stderr
 	if err := export.Run(); err != nil {

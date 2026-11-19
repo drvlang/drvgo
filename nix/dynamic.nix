@@ -42,13 +42,21 @@ let
   }'';
   # Dry-run discovery needs the driver, sources and tool-version metadata.
   # Native compiler probes are emitted for workers to replay instead.
-  # Empty-test validation can compile and execute a selector or compile a
-  # no-test package, including its cgo dependencies. Keep actual compilers
-  # available for that path; explicitly disabling cgo avoids native tools.
+  # Empty-test validation compiles packages with ordinary source files,
+  # including their cgo dependencies. Keep actual compilers available for
+  # that path. Explicitly disabling cgo avoids native tools.
   planningToolchain = if allowEmptyTests then
     (if cgoEnabled == false then toolchain.go else toolchain)
   else
     import ./planning-toolchain.nix { inherit pkgs drvgo; go = toolchain.go; };
+  # Excluded test directories need go/build from the selected SDK. Share its
+  # executable across planners, whose writable Go build caches start empty.
+  testSelector = pkgs.runCommand "drvgo-test-selector" {} ''
+    export HOME="$TMPDIR" GOCACHE="$TMPDIR/cache" GOTOOLCHAIN=local CGO_ENABLED=0
+    cp ${../internal/export/templates/test-selection.go} selection.go
+    ${toolchain.go or toolchain}/bin/go build -p "$NIX_BUILD_CORES" -trimpath -ldflags='-s -w' \
+      -o "$out" selection.go
+  '';
   # These wrappers only run explicit tools; a stdenv setup and its dependency
   # closure are unnecessary on the planning and final forwarding paths.
   planner = builtins.derivation ({
@@ -114,6 +122,8 @@ let
         args = [ "internal-symlink" command (builtins.placeholder "out") ];
       }
     '';
+  } // lib.optionalAttrs allowEmptyTests {
+    inherit testSelector;
   } // lib.optionalAttrs (runtimeInputs != []) {
     # Literal paths in an existing checkout have no Nix string context.
     # Make their data available to the restricted recursive store; the graph

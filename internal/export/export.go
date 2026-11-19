@@ -25,6 +25,7 @@ type Options struct {
 	ExperimentalGo                                                        bool
 	Test                                                                  bool
 	AllowEmptyTests                                                       bool
+	TestSelector                                                          string // Prebuilt with the selected SDK by the dynamic planner.
 	Race                                                                  bool
 	CGOEnabled                                                            *bool
 }
@@ -205,7 +206,7 @@ func Generate(o Options) (*Graph, error) {
 		graph.CGO = "0"
 	}
 	if o.AllowEmptyTests {
-		empty, err := emptyTestSelection(dir, env, goBin, flags, o)
+		empty, err := emptyTestSelection(dir, append(env, "GOROOT="+graph.GoRoot), goBin, flags, o)
 		if err != nil {
 			return nil, err
 		}

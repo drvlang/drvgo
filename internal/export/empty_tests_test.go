@@ -1,6 +1,7 @@
 package export
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -86,6 +87,16 @@ func TestEmptyTestSelection(t *testing.T) {
 			empty, err := emptyTestSelection(dir, env, goBin, []string{"-tags", tt.tags}, Options{Package: pkg, Tags: tt.tags})
 			if (err != nil) != tt.fail || (err == nil && empty != tt.empty) {
 				t.Fatalf("empty=%v err=%v; want empty=%v failure=%v", empty, err, tt.empty, tt.fail)
+			}
+			if tt.name == "all-excluded" {
+				// A configured selector failure must propagate. Falling back to
+				// go run here would silently recompile it in every fresh planner.
+				_, err := emptyTestSelection(dir, env, goBin, nil, Options{
+					Package: pkg, TestSelector: filepath.Join(dir, "missing-selector"),
+				})
+				if !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("missing prebuilt selector: got %v", err)
+				}
 			}
 		})
 	}

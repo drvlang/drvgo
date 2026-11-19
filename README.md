@@ -215,11 +215,19 @@ Test exports remain strict by default. For filesystem-discovered candidate
 directories, use `mkGoPackage { test = true; allowEmptyTests = true; ... }`
 or `drvgo export -test -allow-empty-tests`. Exactly one package is required.
 The selected Go compiler determines platform, release, cgo and build-tag
-eligibility. Successful `go list` results avoid compiling a selection helper;
-excluded directories still use that compiler's typed `go/build` errors.
-No-test packages with eligible ordinary sources
-are actually compiled during planning, so load, syntax and type errors remain
-fatal. Entirely excluded source directories may produce an empty result.
+eligibility. When `go list` cannot decide eligibility, drvgo checks the
+selected SDK's typed `go/build` errors. Dynamic optional-test jobs share one
+cacheable selection helper per SDK, so fresh planners can check excluded
+directories without compiling the helper again. Standalone exports run the
+helper with the selected `go` command on demand.
+
+In a six-package Linux CI matrix with four excluded directories, sharing the
+helper reduced median build time from 7.34 s to 1.36 s. Building the helper
+with the SDK already available took a median of 3.15 s. [CI measurements](benchmarks/ci-round29-2026-11-19.md)
+
+Packages with eligible ordinary sources and no tests are compiled during
+planning, so load, syntax and type errors remain fatal. Entirely excluded
+source directories may produce an empty result.
 
 An empty result has no `bin` directory and contains
 `nix-support/no-tests` with `{"version":1,"status":"no-tests"}` and a trailing

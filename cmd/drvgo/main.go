@@ -46,6 +46,12 @@ func run(args []string) error {
 		return fmt.Errorf("usage: drvgo {build|export|run} [-C dir] [-out .drvgo] [-o result] [-tags tags] [-ldflags flags] [package] [-- program args]")
 	}
 	command := args[0]
+	var testSelector string
+	if command == "internal-export" {
+		// Only the Nix planner supplies a selector built with its chosen SDK.
+		testSelector = os.Getenv("testSelector")
+		command = "export"
+	}
 	if command != "build" && command != "export" && command != "run" {
 		return fmt.Errorf("unknown command %q", command)
 	}
@@ -94,7 +100,7 @@ func run(args []string) error {
 		value := *cgo == "1"
 		cgoEnabled = &value
 	}
-	graph, err := exporter.Generate(exporter.Options{Dir: abs, Out: exportDir, Package: pkg, Tags: *tags, LDFlags: *ldflags, Toolchain: *toolchain, ModuleProxy: *moduleProxy, ModuleCache: *moduleCache, ExperimentalGo: *experimentalGo, Test: *test, AllowEmptyTests: *allowEmptyTests, Race: *race, CGOEnabled: cgoEnabled})
+	graph, err := exporter.Generate(exporter.Options{Dir: abs, Out: exportDir, Package: pkg, Tags: *tags, LDFlags: *ldflags, Toolchain: *toolchain, ModuleProxy: *moduleProxy, ModuleCache: *moduleCache, ExperimentalGo: *experimentalGo, Test: *test, AllowEmptyTests: *allowEmptyTests, TestSelector: testSelector, Race: *race, CGOEnabled: cgoEnabled})
 	if err != nil {
 		return err
 	}

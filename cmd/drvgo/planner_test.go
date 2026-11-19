@@ -16,7 +16,7 @@ func TestMain(m *testing.M) {
 		os.Exit(m.Run())
 	}
 	stage := "evaluator"
-	if len(os.Args) > 1 && os.Args[1] == "export" {
+	if len(os.Args) > 1 && os.Args[1] == "internal-export" {
 		stage = "exporter"
 	}
 	record := struct {
@@ -90,7 +90,7 @@ func TestPlannerArgumentsAndEnvironment(t *testing.T) {
 					t.Fatalf("unexpected environment: %v", record.Env)
 				}
 				if stage == "exporter" {
-					want := append([]string{"export", "-C", os.Getenv("src"), "-out", filepath.Join(tmp, "graph")}, args...)
+					want := append([]string{"internal-export", "-C", os.Getenv("src"), "-out", filepath.Join(tmp, "graph")}, args...)
 					if !reflect.DeepEqual(record.Args[1:], want) {
 						t.Fatalf("arguments changed: %q; want %q", record.Args, want)
 					}

@@ -51,12 +51,18 @@ func emptyTestSelection(dir string, env []string, goBin string, flags []string, 
 		// An excluded directory may carry a load error. Use the selected Go
 		// release's typed NoGoError to distinguish it from genuine failures;
 		// never infer an empty result from localized diagnostic text.
-		source, _ := templates.ReadFile("templates/test-selection.go")
-		helper := filepath.Join(tmp, "selection.go")
-		if err := os.WriteFile(helper, source, 0644); err != nil {
-			return false, err
+		selector := o.TestSelector
+		args := []string{p.Dir, o.Tags, strconv.FormatBool(o.Race)}
+		if selector == "" {
+			source, _ := templates.ReadFile("templates/test-selection.go")
+			helper := filepath.Join(tmp, "selection.go")
+			if err := os.WriteFile(helper, source, 0644); err != nil {
+				return false, err
+			}
+			selector = goBin
+			args = append([]string{"run", helper}, args...)
 		}
-		data, err = run(dir, env, goBin, "run", helper, p.Dir, o.Tags, strconv.FormatBool(o.Race))
+		data, err = run(dir, env, selector, args...)
 		if err != nil {
 			return false, err
 		}

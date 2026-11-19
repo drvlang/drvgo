@@ -1,0 +1,204 @@
+{
+  "baseline": "dcc285b33b666a0c96e16b3d97dc339ed934abcf",
+  "system": "x86_64-linux",
+  "go": "go1.26.5",
+  "nix": "nix (Determinate Nix 3.24.1) 2.35.3",
+  "trial_order": "Trial zero is an excluded warmup. The candidate runs first on odd trials and the baseline runs first on even trials.",
+  "units": "wall-clock seconds",
+  "packages": "Warm tools and package outputs, a new dynamic planner (and writable Go cache) for each package on every trial.",
+  "flags": [
+    "--extra-experimental-features",
+    "ca-derivations dynamic-derivations recursive-nix",
+    "--option",
+    "sandbox",
+    "true",
+    "--option",
+    "sandbox-fallback",
+    "false",
+    "--option",
+    "allow-import-from-derivation",
+    "false",
+    "--option",
+    "substituters",
+    "",
+    "--option",
+    "always-allow-substitutes",
+    "false",
+    "--max-jobs",
+    "4",
+    "--cores",
+    "2"
+  ],
+  "matrix": {
+    "files": {
+      "go.mod": "module example.org/ci\ngo 1.25\n",
+      "pkg/future/future_test.go": "//go:build go1.999\n\npackage future\n",
+      "pkg/integration/integration_test.go": "//go:build integration\n\npackage integration\n",
+      "pkg/library/library.go": "package library\nconst Value=42\n",
+      "pkg/macos/macos_darwin_test.go": "package macos\n",
+      "pkg/native/native.go": "//go:build cgo\n\npackage native\n",
+      "pkg/portable/portable_test.go": "package portable\nimport \"testing\"\nfunc TestPortable(t *testing.T) {}\n"
+    },
+    "packages": [
+      "portable",
+      "library",
+      "integration",
+      "macos",
+      "native",
+      "future"
+    ],
+    "command": "nix-build <flags> --no-out-link --expr <matrix expression from the report>",
+    "total": {
+      "before": [12.047877, 6.721227, 6.970955, 17.774041, 11.545023, 7.338821],
+      "after": [1.345062, 1.361531, 1.34098, 1.363139, 1.363339, 1.316565]
+    },
+    "package_outputs": [
+      "/nix/store/0r4i06ggqsj3k3kpidsinzvfhkqpfinw-go-example.org-ci-pkg-portable.test",
+      "/nix/store/1lbg54dinvq7y19h5jmr8shgx1zrq1fz-go-empty-tests",
+      "/nix/store/1lbg54dinvq7y19h5jmr8shgx1zrq1fz-go-empty-tests",
+      "/nix/store/1lbg54dinvq7y19h5jmr8shgx1zrq1fz-go-empty-tests",
+      "/nix/store/1lbg54dinvq7y19h5jmr8shgx1zrq1fz-go-empty-tests",
+      "/nix/store/1lbg54dinvq7y19h5jmr8shgx1zrq1fz-go-empty-tests"
+    ]
+  },
+  "single": {
+    "excluded-nix": {
+      "source": "excluded",
+      "cgo": "0",
+      "test": true,
+      "allow_empty_tests": true,
+      "iets": null,
+      "package_output": "/nix/store/1lbg54dinvq7y19h5jmr8shgx1zrq1fz-go-empty-tests",
+      "measurements": {
+        "evaluation": {
+          "before": [0.404044, 0.433745, 0.425489, 0.40772, 0.39384, 0.442014, 0.444405, 0.707692],
+          "after": [0.411412, 0.410871, 0.403778, 0.428289, 0.399674, 0.417454, 0.447207, 0.438566]
+        },
+        "realization": {
+          "before": [2.967232, 2.945709, 2.983006, 2.951639, 2.960365, 3.169874, 4.864843, 3.702479],
+          "after": [0.194129, 0.187761, 0.190095, 0.186039, 0.187884, 0.191666, 0.210602, 0.280007]
+        },
+        "total": {
+          "before": [3.371276, 3.379454, 3.408495, 3.359359, 3.354204, 3.611888, 5.309248, 4.410171],
+          "after": [0.60554, 0.598632, 0.593873, 0.614327, 0.587558, 0.609119, 0.65781, 0.718573]
+        }
+      },
+      "files": {
+        "go.mod": "module example.org/optional\ngo 1.25\n",
+        "optional.go": "//go:build optional\n\npackage optional\n"
+      }
+    },
+    "excluded-iets": {
+      "source": "excluded",
+      "cgo": null,
+      "test": true,
+      "allow_empty_tests": true,
+      "iets": "/nix/store/5ljnxv23w4cffw8fh9cpzawdiqyq2pnr-iets-static-x86_64-unknown-linux-musl-0.2.0",
+      "package_output": "/nix/store/1lbg54dinvq7y19h5jmr8shgx1zrq1fz-go-empty-tests",
+      "measurements": {
+        "evaluation": {
+          "before": [0.241988, 0.23655, 0.217473, 0.247504, 0.259593, 0.22479, 0.231612, 0.225368],
+          "after": [1.808388, 0.230027, 0.231123, 0.240003, 0.227235, 0.220681, 0.233007, 0.222103]
+        },
+        "realization": {
+          "before": [21.402163, 2.933947, 2.907905, 3.24647, 3.109902, 2.951872, 2.945701, 2.917829],
+          "after": [0.311889, 0.21227, 0.231694, 0.251262, 0.205922, 0.208234, 0.218057, 0.209881]
+        },
+        "total": {
+          "before": [21.644151, 3.170497, 3.125378, 3.493975, 3.369496, 3.176663, 3.177313, 3.143197],
+          "after": [2.120277, 0.442297, 0.462817, 0.491265, 0.433156, 0.428915, 0.451064, 0.431984]
+        }
+      },
+      "files": {
+        "go.mod": "module example.org/optional\ngo 1.25\n",
+        "optional.go": "//go:build optional\n\npackage optional\n"
+      }
+    },
+    "eligible": {
+      "source": "eligible",
+      "cgo": "0",
+      "test": true,
+      "allow_empty_tests": true,
+      "iets": null,
+      "package_output": "/nix/store/qn8f95ljynfwh3xh3r020kgb9qk6zlb9-go-example.org-optional.test",
+      "measurements": {
+        "evaluation": {
+          "before": [0.437726, 0.449177, 0.445814, 0.532736, 0.783023, 0.490566, 0.421415, 0.431301],
+          "after": [0.420999, 0.429153, 0.41987, 0.49048, 0.452747, 0.708704, 0.419786, 0.428093]
+        },
+        "realization": {
+          "before": [0.883245, 0.695344, 0.694961, 1.091988, 0.805072, 0.697632, 0.698654, 0.675647],
+          "after": [0.635327, 0.653825, 0.69202, 1.121408, 0.778974, 1.127081, 0.667414, 0.678832]
+        },
+        "total": {
+          "before": [1.320971, 1.144521, 1.140775, 1.624724, 1.588095, 1.188197, 1.120068, 1.106947],
+          "after": [1.056327, 1.082979, 1.11189, 1.611889, 1.231722, 1.835785, 1.0872, 1.106925]
+        }
+      },
+      "files": {
+        "go.mod": "module example.org/optional\ngo 1.25\n",
+        "optional_test.go": "package optional\nimport \"testing\"\nfunc TestValue(t *testing.T) {}\n"
+      }
+    },
+    "no-tests": {
+      "source": "regular",
+      "cgo": "0",
+      "test": true,
+      "allow_empty_tests": true,
+      "iets": null,
+      "package_output": "/nix/store/1lbg54dinvq7y19h5jmr8shgx1zrq1fz-go-empty-tests",
+      "measurements": {
+        "evaluation": {
+          "before": [0.422215, 0.420983, 0.413166, 0.406681, 0.424352, 0.423562, 0.405008, 0.428436],
+          "after": [0.404985, 0.418378, 0.440364, 0.425721, 0.415591, 0.423774, 0.413014, 0.401118]
+        },
+        "realization": {
+          "before": [0.198026, 0.207033, 0.212205, 0.203236, 0.205004, 0.204218, 0.204566, 0.211577],
+          "after": [0.206303, 0.210925, 0.217925, 0.206823, 0.209614, 0.207578, 0.204579, 0.198592]
+        },
+        "total": {
+          "before": [0.620241, 0.628016, 0.625371, 0.609917, 0.629357, 0.62778, 0.609575, 0.640012],
+          "after": [0.611288, 0.629303, 0.658289, 0.632544, 0.625205, 0.631352, 0.617594, 0.59971]
+        }
+      },
+      "files": {
+        "go.mod": "module example.org/optional\ngo 1.25\n",
+        "optional.go": "package optional\nconst Value=42\n"
+      }
+    },
+    "command": {
+      "source": "tests/fixture",
+      "cgo": null,
+      "test": false,
+      "allow_empty_tests": false,
+      "iets": null,
+      "package_output": "/nix/store/nbhqfxg9p70afn0nrkx1fbxxx4ymsgp1-go-example.com-libnix-fixture",
+      "measurements": {
+        "evaluation": {
+          "before": [0.429404, 0.406749, 0.405531, 0.405139, 0.422054, 0.411519, 0.403247, 0.428988],
+          "after": [0.425419, 0.411807, 0.415463, 0.402833, 0.428669, 0.39387, 0.429005, 0.402129]
+        },
+        "realization": {
+          "before": [0.460051, 0.481829, 0.485241, 0.470921, 0.478437, 0.475012, 0.472567, 0.491932],
+          "after": [0.471844, 0.474122, 0.478608, 0.474226, 0.483537, 0.472635, 0.483244, 0.478948]
+        },
+        "total": {
+          "before": [0.889455, 0.888578, 0.890772, 0.87606, 0.900491, 0.886531, 0.875814, 0.920921],
+          "after": [0.897263, 0.885929, 0.89407, 0.877059, 0.912206, 0.866505, 0.912249, 0.881077]
+        }
+      }
+    }
+  },
+  "selector": {
+    "derivation": "/nix/store/amrd9w3747i7fdhy8xzrydijkqlfxv50-drvgo-test-selector.drv",
+    "rebuild_with_cached_inputs": [3.274197, 3.126633, 3.14555, 3.185151, 3.151122, 3.133792],
+    "command": "nix-store --realise <derivation> --check --max-jobs 1 --cores 2 --option substituters '' --option sandbox true --option sandbox-fallback false",
+    "output": "/nix/store/hf3gy9q4w0iv35sixp1v1lr5np3cfn92-drvgo-test-selector",
+    "nar_bytes": 3035448,
+    "cache_bytes": 1321021,
+    "compression": "zstd level 3",
+    "references": [
+      "vlgjd2179ahfh509p1aid8fl22bw8ri3-tzdata-2026c"
+    ]
+  }
+}
