@@ -252,14 +252,25 @@ if a.flake_toolchain:
     nested = out/'nested-command'
     write(nested/'go.mod', 'module example.com/nested\n\ngo 1.25\n')
     write(nested/'cmd/hello/main.go', 'package main\nimport ("fmt"; _ "net")\nfunc main(){fmt.Println("nested works")}\n')
-    result = run(['nix-build',repo/'tests/dynamic-compatibility.nix','--argstr','system',system,
-        '--argstr','toolchainAttr',a.flake_toolchain,'--arg','src',f'builtins.path {{ path = {json.dumps(str(nested))}; name = "source"; }}',
-        '--argstr','package','./cmd/hello','--argstr','ldflags','--buildid=custom/ID',
-        '--option','allow-import-from-derivation','false','--option','sandbox','true',
-        '--option','sandbox-fallback','false','--max-jobs','4','--cores','2','--no-out-link']).stdout.decode().strip()
+    write(nested/'flake.nix', f'''{{
+      inputs.drvgo.url = "github:ryantm/drvgo";
+      outputs = {{ self, drvgo }}: drvgo.lib.mkFlake {{
+        src = self; package = "./cmd/hello"; go = "{version.removeprefix('go')}";
+        ldflags = "--buildid=custom/ID";
+      }};
+    }}''')
+    flake_args = ['--no-write-lock-file', '--override-input', 'drvgo', repo,
+                  '--option', 'allow-import-from-derivation', 'false', '--option', 'sandbox', 'true',
+                  '--option', 'sandbox-fallback', 'false', '--max-jobs', '4', '--cores', '2', f'path:{nested}']
+    result = run(['nix', 'build', '--no-link', '--print-out-paths', *flake_args]).stdout.decode().strip()
     executable = Path(result)/'bin/hello'
-    assert run([executable]).stdout.decode() == 'nested works\n'
+    assert run(['nix', 'run', *flake_args]).stdout.decode() == 'nested works\n'
     assert run([tc/'bin/go','tool','buildid',executable],go=True).stdout.decode() == 'custom/ID\n'
+    # A test invoked from the module root must find fixtures in its own package.
+    write(nested/'cmd/hello/testdata/message', 'nested fixture')
+    write(nested/'cmd/hello/main_test.go', 'package main\nimport ("os"; "testing")\nfunc TestFixture(t *testing.T) { b, err := os.ReadFile("testdata/message"); if err != nil || string(b) != "nested fixture" { t.Fatal(string(b), err) } }\n')
+    output = run([cli, 'test', '-C', nested, '-go', version.removeprefix('go'), '-v', './cmd/hello']).stdout.decode()
+    assert 'PASS: TestFixture' in output, output
     report['dynamic_nested_custom_buildid']='passed'
     print(version,'nested-command/custom-buildid/dynamic/IFD-disabled PASS',flush=True)
     dynamic = run(['nix-build',repo/'tests/dynamic-compatibility.nix','--argstr','system',system,

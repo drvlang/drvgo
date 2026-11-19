@@ -9,24 +9,14 @@
       systems = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
       packageSets = forAllSystems (system: import nixpkgs { inherit system; });
-      toolchains = forAllSystems (system:
-        import ./internal/export/templates/toolchain-builder.nix {
-          pkgs = packageSets.${system};
-        });
     in {
       packages = forAllSystems (system: rec {
         drvgo = import ./nix/package.nix { pkgs = packageSets.${system}; };
         default = drvgo;
-        toolchain-go1_25 = self.lib.mkToolchain { inherit system; go = packageSets.${system}.go_1_25; };
-        toolchain-go1_26 = toolchains.${system};
-        toolchain-go1_26_6 = self.lib.mkToolchain {
-          inherit system;
-          go = import ./nix/go-1.26.6.nix { pkgs = packageSets.${system}; };
-        };
-        toolchain-go1_27 = self.lib.mkToolchain {
-          inherit system;
-          go = import ./nix/go-1.27.4.nix { pkgs = packageSets.${system}; };
-        };
+        toolchain-go1_25 = self.lib.mkToolchain { inherit system; go = "1.25.12"; };
+        toolchain-go1_26 = self.lib.mkToolchain { inherit system; };
+        toolchain-go1_26_6 = self.lib.mkToolchain { inherit system; go = "1.26.6"; };
+        toolchain-go1_27 = self.lib.mkToolchain { inherit system; go = "1.27.4"; };
       });
       apps = forAllSystems (system: rec {
         drvgo = {
@@ -39,12 +29,29 @@
       checks = forAllSystems (system: {
         drvgo = self.packages.${system}.drvgo;
       });
-      # Call with { system; src; package; vendorHash; ... }.
-      # Only invoking this helper requires the dynamic Nix features.
+      # Publish the same project as the default package on each supported system.
+      lib.mkFlake = args: rec {
+        packages = forAllSystems (system: {
+          default = self.lib.mkGoPackage (args // { inherit system; });
+        });
+        apps = forAllSystems (system: let package = packages.${system}.default; in {
+          default = {
+            type = "app";
+            # Go determines the command name during the build. Each result has one binary.
+            program = toString (packageSets.${system}.writeShellScript "drvgo-run" ''
+              if [[ -f ${package}/nix-support/no-tests ]]; then exit 0; fi
+              shopt -s dotglob
+              exec ${package}/bin/* "$@"
+            '');
+          };
+        });
+      };
       lib.mkToolchain = { system, go ? packageSets.${system}.go }:
         import ./internal/export/templates/toolchain-builder.nix {
           pkgs = packageSets.${system};
-          inherit go;
+          go = if builtins.isString go
+            then import ./internal/export/templates/go-version.nix packageSets.${system} go
+            else go;
         };
       lib.mkGoPackage = { system, go ? packageSets.${system}.go, ... }@args:
         (import ./nix/dynamic.nix {

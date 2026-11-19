@@ -22,6 +22,7 @@ var templates embed.FS
 
 type Options struct {
 	Dir, Out, Package, Tags, LDFlags, Toolchain, ModuleProxy, ModuleCache string
+	GoVersion                                                             string
 	ExperimentalGo                                                        bool
 	Test                                                                  bool
 	AllowEmptyTests                                                       bool
@@ -39,6 +40,7 @@ type Package struct {
 	GoFiles, CgoFiles, CFiles, CXXFiles, MFiles, HFiles, FFiles, SFiles, SysoFiles, EmbedFiles []string
 }
 type Graph struct {
+	PackageDir     string            `json:"-"` // Working directory for the local test executable.
 	EmptyTests     bool              `json:"emptyTests,omitempty"`
 	Driver         string            `json:"driver"`
 	ExperimentalGo bool              `json:"experimentalGo,omitempty"`
@@ -71,15 +73,37 @@ func run(dir string, env []string, name string, args ...string) ([]byte, error) 
 }
 
 func Toolchain() (string, error) {
-	b, _ := templates.ReadFile("templates/toolchain.nix")
-	builder, _ := templates.ReadFile("templates/toolchain-builder.nix")
-	for _, name := range []string{"runner.go", "buildid.go", "pack.go", "pack.patch", "pack-go1.27.patch", "cc-query.c.in"} {
-		data, _ := templates.ReadFile("templates/" + name)
-		builder = []byte(strings.Replace(string(builder), "builtins.readFile ./"+name, nixString(string(data)), 1))
+	return toolchainForVersion("")
+}
+
+func toolchainForVersion(version string) (string, error) {
+	dir, err := os.MkdirTemp("", "drvgo-toolchain-")
+	if err != nil {
+		return "", err
 	}
-	expression := strings.Replace(string(b), "import ./toolchain-builder.nix", "("+string(builder)+")", 1)
-	out, err := run("", os.Environ(), "nix-build", "--no-out-link", "--expr", expression)
+	defer os.RemoveAll(dir)
+	if err := writeToolchainFiles(dir, version); err != nil {
+		return "", err
+	}
+	out, err := run(dir, os.Environ(), "nix-build", "toolchain.nix", "--no-out-link")
 	return strings.TrimSpace(string(out)), err
+}
+
+// Keep the CLI's toolchain and the standalone export reproducible from the same files.
+func writeToolchainFiles(dir, version string) error {
+	for _, name := range []string{"toolchain.nix", "pinned-toolchain.nix", "toolchain-builder.nix", "go-version.nix", "runner.go", "buildid.go", "pack.go", "pack.patch", "pack-go1.27.patch", "cc-query.c.in"} {
+		data, err := templates.ReadFile("templates/" + name)
+		if err != nil {
+			return err
+		}
+		if name == "toolchain.nix" && version != "" {
+			data = []byte("import ./pinned-toolchain.nix { goVersion = " + nixString(version) + "; }\n")
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), data, 0644); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // controlledEnv makes the planner independent of ambient Go settings. Builds
@@ -141,9 +165,12 @@ func Generate(o Options) (*Graph, error) {
 	if o.Package == "" {
 		o.Package = "."
 	}
+	if o.GoVersion != "" && o.Toolchain != "" {
+		return nil, fmt.Errorf("choose either -go or -toolchain")
+	}
 	tc := o.Toolchain
 	if tc == "" {
-		tc, err = Toolchain()
+		tc, err = toolchainForVersion(o.GoVersion)
 		if err != nil {
 			return nil, err
 		}
@@ -211,7 +238,7 @@ func Generate(o Options) (*Graph, error) {
 			return nil, err
 		}
 		if empty {
-			return exportEmptyTests(o.Out, tc, graph)
+			return exportEmptyTests(o.Out, tc, o.GoVersion, graph)
 		}
 	}
 	// In particular, do not request Stale: calculating it hashes the build
@@ -371,19 +398,24 @@ func Generate(o Options) (*Graph, error) {
 		graph.NativeLink = false
 		graph.InternalLink = nativeObjects
 	}
+	graph.PackageDir = target.Dir
 	graph.BinaryName = binaryName
 	graph.Root = root
 	graph.Units = units
-	for _, name := range []string{"default.nix", "toolchain.nix", "toolchain-builder.nix", "runner.go", "buildid.go", "pack.go", "pack.patch", "pack-go1.27.patch", "cc-query.c.in"} {
-		b, _ := templates.ReadFile("templates/" + name)
-		if err = os.WriteFile(filepath.Join(staging, name), b, 0644); err != nil {
-			return nil, err
-		}
+	if err = writeToolchainFiles(staging, o.GoVersion); err != nil {
+		return nil, err
+	}
+	b, err := templates.ReadFile("templates/default.nix")
+	if err != nil {
+		return nil, err
+	}
+	if err = os.WriteFile(filepath.Join(staging, "default.nix"), b, 0644); err != nil {
+		return nil, err
 	}
 	if err = os.WriteFile(filepath.Join(staging, "scripts.nix"), []byte(nixScripts(units)), 0644); err != nil {
 		return nil, err
 	}
-	b, err := json.Marshal(graph)
+	b, err = json.Marshal(graph)
 	if err != nil {
 		return nil, err
 	}

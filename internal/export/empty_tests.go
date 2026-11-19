@@ -85,7 +85,7 @@ func emptyTestSelection(dir string, env []string, goBin string, flags []string, 
 	return true, nil
 }
 
-func exportEmptyTests(out, tc string, g *Graph) (*Graph, error) {
+func exportEmptyTests(out, tc, version string, g *Graph) (*Graph, error) {
 	out, err := filepath.Abs(out)
 	if err != nil {
 		return nil, err
@@ -123,14 +123,8 @@ emptyTests = "1";
 			return nil, err
 		}
 	}
-	for _, name := range []string{"toolchain.nix", "toolchain-builder.nix", "runner.go", "buildid.go", "pack.go", "pack.patch", "pack-go1.27.patch", "cc-query.c.in"} {
-		data, err := templates.ReadFile("templates/" + name)
-		if err != nil {
-			return nil, err
-		}
-		if err := os.WriteFile(filepath.Join(staging, name), data, 0644); err != nil {
-			return nil, err
-		}
+	if err := writeToolchainFiles(staging, version); err != nil {
+		return nil, err
 	}
 	if err := writeResolvedToolchain(staging, tc); err != nil {
 		return nil, err

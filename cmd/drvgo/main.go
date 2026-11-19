@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	exporter "github.com/ryantm/drvgo/internal/export"
 	"github.com/ryantm/drvgo/internal/modcache"
@@ -23,9 +24,24 @@ func main() {
 	}
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "drvgo:", err)
+		if e, ok := err.(*exec.ExitError); ok && e.ExitCode() > 0 {
+			os.Exit(e.ExitCode())
+		}
 		os.Exit(1)
 	}
 }
+
+const usage = `Usage: drvgo <command> [options] [package]
+
+  build    Build a command into result/bin/
+  run      Build and run a command
+  test     Build and run one package's tests
+  export   Write a standalone Nix build to .drvgo/
+
+The package defaults to the current directory. Use -- before program arguments.
+Run drvgo <command> -h for options.
+`
+
 func run(args []string) error {
 	if len(args) >= 2 && args[0] == "internal-plan" {
 		return plan(os.Getenv("plannerEvaluator"), args[1], args[2:])
@@ -42,65 +58,85 @@ func run(args []string) error {
 	if len(args) == 3 && args[0] == "internal-copy-derivation" {
 		return nixstore.Copy(os.Getenv("NIX_REMOTE"), args[1], args[2])
 	}
-	if len(args) == 0 {
-		return fmt.Errorf("usage: drvgo {build|export|run} [-C dir] [-out .drvgo] [-o result] [-tags tags] [-ldflags flags] [package] [-- program args]")
+	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || (len(args) == 1 && args[0] == "help") {
+		fmt.Fprint(os.Stdout, usage)
+		return nil
+	}
+	if len(args) == 2 && args[0] == "help" {
+		args = []string{args[1], "-h"}
 	}
 	command := args[0]
-	var testSelector string
+	var opts exporter.Options
 	if command == "internal-export" {
 		// Only the Nix planner supplies a selector built with its chosen SDK.
-		testSelector = os.Getenv("testSelector")
+		opts.TestSelector = os.Getenv("testSelector")
 		command = "export"
 	}
-	if command != "build" && command != "export" && command != "run" {
-		return fmt.Errorf("unknown command %q", command)
+	if command != "build" && command != "export" && command != "run" && command != "test" {
+		return fmt.Errorf("unknown command %q. Run drvgo --help", command)
 	}
 	f := flag.NewFlagSet(command, flag.ContinueOnError)
-	dir := f.String("C", ".", "project directory")
-	out := f.String("out", ".drvgo", "export directory (relative to project)")
-	output := f.String("o", "result", "Nix output symlink (relative to project)")
-	toolchain := f.String("toolchain", "", "prebuilt pinned toolchain path")
-	experimentalGo := f.Bool("experimental-go", false, "try an untested numbered Go toolchain (no compatibility guarantee)")
-	test := f.Bool("test", false, "export one package's test binary")
-	allowEmptyTests := f.Bool("allow-empty-tests", false, "emit an explicit empty result for a package with no eligible tests (requires -test)")
-	race := f.Bool("race", false, "enable Go's race detector")
+	f.StringVar(&opts.Dir, "C", ".", "project directory")
+
+	output := "result"
+	if command == "export" {
+		f.StringVar(&opts.Out, "o", ".drvgo", "export directory (relative to project)")
+		f.StringVar(&opts.Out, "out", ".drvgo", "alias for -o")
+	} else {
+		f.StringVar(&opts.Out, "out", ".drvgo", "export directory (relative to project)")
+		f.StringVar(&output, "o", "result", "Nix output symlink (relative to project)")
+	}
+	f.StringVar(&opts.GoVersion, "go", "", "target Go version, e.g. 1.27.4")
+	f.StringVar(&opts.Toolchain, "toolchain", "", "prebuilt pinned toolchain path")
+	f.BoolVar(&opts.ExperimentalGo, "experimental-go", false, "try an untested numbered Go toolchain (no compatibility guarantee)")
+	opts.Test = command == "test"
+	var verbose bool
+	var testRun string
+	if opts.Test {
+		f.BoolVar(&verbose, "v", false, "show individual test results")
+		f.StringVar(&testRun, "run", "", "run tests matching this regular expression")
+	} else {
+		f.BoolVar(&opts.Test, "test", false, "build a test binary")
+	}
+	f.BoolVar(&opts.AllowEmptyTests, "allow-empty-tests", command == "test", "emit an explicit empty result for a package with no eligible tests (test builds only)")
+	f.BoolVar(&opts.Race, "race", false, "enable Go's race detector")
 	cgo := f.String("cgo", "", "override cgo: 0 or 1")
-	moduleProxy := f.String("module-proxy", "", "explicit module proxy (off or file:// path for offline planning)")
-	moduleCache := f.String("module-cache", "", "prepared module cache for offline planning")
-	tags := f.String("tags", "", "Go build tags")
-	ldflags := f.String("ldflags", "", "Go linker flags")
-	if err := f.Parse(args[1:]); err != nil {
-		return err
+	f.StringVar(&opts.ModuleProxy, "module-proxy", "", "explicit module proxy (off or file:// path for offline planning)")
+	f.StringVar(&opts.ModuleCache, "module-cache", "", "prepared module cache for offline planning")
+	f.StringVar(&opts.Tags, "tags", "", "Go build tags")
+	f.StringVar(&opts.LDFlags, "ldflags", "", "Go linker flags")
+	execute := command == "run" || command == "test"
+	f.Usage = func() {
+		fmt.Fprintf(f.Output(), "Usage: drvgo %s [options] [package]", command)
+		if execute {
+			fmt.Fprint(f.Output(), " [-- arguments]")
+		}
+		fmt.Fprintln(f.Output())
+		f.PrintDefaults()
 	}
-	positional := f.Args()
-	pkg := "."
-	if len(positional) > 0 {
-		pkg = positional[0]
-		positional = positional[1:]
+	pkg, programArgs, err := parsePackage(f, args[1:], execute)
+	if err == flag.ErrHelp {
+		return nil
 	}
-	if len(positional) > 0 && positional[0] == "--" {
-		positional = positional[1:]
-	}
-	if len(positional) > 0 && command != "run" {
-		return fmt.Errorf("unexpected arguments: %v", positional)
-	}
-	abs, err := filepath.Abs(*dir)
 	if err != nil {
 		return err
 	}
-	exportDir := *out
-	if !filepath.IsAbs(exportDir) {
-		exportDir = filepath.Join(abs, exportDir)
+	opts.Dir, err = filepath.Abs(opts.Dir)
+	if err != nil {
+		return err
 	}
-	var cgoEnabled *bool
+	if !filepath.IsAbs(opts.Out) {
+		opts.Out = filepath.Join(opts.Dir, opts.Out)
+	}
 	if *cgo != "" {
 		if *cgo != "0" && *cgo != "1" {
 			return fmt.Errorf("-cgo must be 0 or 1")
 		}
 		value := *cgo == "1"
-		cgoEnabled = &value
+		opts.CGOEnabled = &value
 	}
-	graph, err := exporter.Generate(exporter.Options{Dir: abs, Out: exportDir, Package: pkg, Tags: *tags, LDFlags: *ldflags, Toolchain: *toolchain, ModuleProxy: *moduleProxy, ModuleCache: *moduleCache, ExperimentalGo: *experimentalGo, Test: *test, AllowEmptyTests: *allowEmptyTests, TestSelector: testSelector, Race: *race, CGOEnabled: cgoEnabled})
+	opts.Package = pkg
+	graph, err := exporter.Generate(opts)
 	if err != nil {
 		return err
 	}
@@ -110,31 +146,81 @@ func run(args []string) error {
 	for _, diagnostic := range graph.Diagnostics {
 		fmt.Fprintln(os.Stderr, "drvgo:", diagnostic)
 	}
-	fmt.Fprintf(os.Stderr, "Exported %d package derivations to %s\n", len(graph.Units), exportDir)
+	fmt.Fprintf(os.Stderr, "Exported %d package derivations to %s\n", len(graph.Units), opts.Out)
 	if command == "export" {
 		return nil
 	}
-	link := *output
+	link := output
 	if !filepath.IsAbs(link) {
-		link = filepath.Join(abs, link)
+		link = filepath.Join(opts.Dir, link)
 	}
-	c := exec.Command("nix-build", filepath.Join(exportDir, "default.nix"), "-A", "default", "--out-link", link, "--max-jobs", "4", "--cores", "2")
+	c := exec.Command("nix-build", filepath.Join(opts.Out, "default.nix"), "-A", "default", "--out-link", link, "--max-jobs", "4", "--cores", "2")
 	c.Stdout = os.Stdout
+	if execute {
+		c.Stdout = os.Stderr
+	}
 	c.Stderr = os.Stderr
 	if err = c.Run(); err != nil {
 		return err
 	}
-	if command == "run" {
+	if execute {
 		if graph.EmptyTests {
 			fmt.Fprintln(os.Stderr, "drvgo: no eligible tests")
 			return nil
 		}
-		c = exec.Command(filepath.Join(link, "bin", graph.BinaryName), positional...)
-		c.Dir = abs
+		if verbose {
+			programArgs = append([]string{"-test.v"}, programArgs...)
+		}
+		if testRun != "" {
+			programArgs = append([]string{"-test.run", testRun}, programArgs...)
+		}
+		c = exec.Command(filepath.Join(link, "bin", graph.BinaryName), programArgs...)
+		c.Dir = opts.Dir
+		if command == "test" {
+			c.Dir = graph.PackageDir
+		}
 		c.Stdin = os.Stdin
 		c.Stdout = os.Stdout
 		c.Stderr = os.Stderr
 		return c.Run()
 	}
 	return nil
+}
+
+// Before a package, -- means "use the current package and pass the rest to it".
+// After a package, flag.Parse already leaves the complete argument list intact.
+func parsePackage(f *flag.FlagSet, args []string, execute bool) (string, []string, error) {
+	var forwarded []string
+	if execute {
+		for i := 0; i < len(args); i++ {
+			arg := args[i]
+			if arg == "--" {
+				forwarded, args = args[i+1:], args[:i]
+				break
+			}
+			name, _, attached := strings.Cut(arg, "=")
+			opt := f.Lookup(strings.TrimLeft(name, "-"))
+			if !strings.HasPrefix(name, "-") || opt == nil {
+				break
+			}
+			// A string flag may itself take "--" as its value.
+			if _, boolean := opt.Value.(interface{ IsBoolFlag() bool }); !boolean && !attached {
+				i++
+			}
+		}
+	}
+	if err := f.Parse(args); err != nil {
+		return "", nil, err
+	}
+	if f.NArg() == 0 {
+		return ".", forwarded, nil
+	}
+	pkg, rest := f.Arg(0), f.Args()[1:]
+	if len(rest) > 0 && rest[0] == "--" {
+		rest = rest[1:]
+	}
+	if len(rest) > 0 && !execute {
+		return "", nil, fmt.Errorf("unexpected arguments: %v", rest)
+	}
+	return pkg, rest, nil
 }

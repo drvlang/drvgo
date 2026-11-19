@@ -50,7 +50,7 @@ func checkRequirements(dir, selected string) ([]string, error) {
 			}
 			directive, value := fields[0], fields[1]
 			if directive == "go" && version.IsValid("go"+value) && version.Compare(selected, "go"+value) < 0 {
-				return nil, fmt.Errorf("%s requires Go >= %s, but selected toolchain is %s (GOTOOLCHAIN=local); select a newer tested compiler with -toolchain or mkGoPackage.go", path, value, selected)
+				return nil, fmt.Errorf("%s requires Go >= %s, but selected toolchain is %s (GOTOOLCHAIN=local); select a newer compiler with -go or the Nix go option", path, value, selected)
 			}
 			if directive == "toolchain" && (work == "" || path == work) && version.IsValid(value) && version.Compare(selected, value) < 0 {
 				diagnostics = append(diagnostics, fmt.Sprintf("%s suggests %s; keeping explicitly selected %s with GOTOOLCHAIN=local", path, value, selected))
