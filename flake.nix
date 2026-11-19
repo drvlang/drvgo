@@ -23,6 +23,10 @@
           inherit system;
           go = import ./nix/go-1.26.6.nix { pkgs = packageSets.${system}; };
         };
+        toolchain-go1_27 = self.lib.mkToolchain {
+          inherit system;
+          go = import ./nix/go-1.27.4.nix { pkgs = packageSets.${system}; };
+        };
       });
       apps = forAllSystems (system: rec {
         drvgo = {

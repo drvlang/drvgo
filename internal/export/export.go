@@ -17,7 +17,7 @@ import (
 	"github.com/ryantm/drvgo/internal/plan"
 )
 
-//go:embed templates/*.nix templates/runner.go templates/buildid.go templates/pack.go templates/pack.patch templates/test-selection.go templates/cc-query.c.in
+//go:embed templates/*.nix templates/runner.go templates/buildid.go templates/pack.go templates/*.patch templates/test-selection.go templates/cc-query.c.in
 var templates embed.FS
 
 type Options struct {
@@ -73,7 +73,7 @@ func run(dir string, env []string, name string, args ...string) ([]byte, error) 
 func Toolchain() (string, error) {
 	b, _ := templates.ReadFile("templates/toolchain.nix")
 	builder, _ := templates.ReadFile("templates/toolchain-builder.nix")
-	for _, name := range []string{"runner.go", "buildid.go", "pack.go", "pack.patch", "cc-query.c.in"} {
+	for _, name := range []string{"runner.go", "buildid.go", "pack.go", "pack.patch", "pack-go1.27.patch", "cc-query.c.in"} {
 		data, _ := templates.ReadFile("templates/" + name)
 		builder = []byte(strings.Replace(string(builder), "builtins.readFile ./"+name, nixString(string(data)), 1))
 	}
@@ -374,7 +374,7 @@ func Generate(o Options) (*Graph, error) {
 	graph.BinaryName = binaryName
 	graph.Root = root
 	graph.Units = units
-	for _, name := range []string{"default.nix", "toolchain.nix", "toolchain-builder.nix", "runner.go", "buildid.go", "pack.go", "pack.patch", "cc-query.c.in"} {
+	for _, name := range []string{"default.nix", "toolchain.nix", "toolchain-builder.nix", "runner.go", "buildid.go", "pack.go", "pack.patch", "pack-go1.27.patch", "cc-query.c.in"} {
 		b, _ := templates.ReadFile("templates/" + name)
 		if err = os.WriteFile(filepath.Join(staging, name), b, 0644); err != nil {
 			return nil, err

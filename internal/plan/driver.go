@@ -19,6 +19,7 @@ var testedVersions = map[string]string{
 	"go1.25.12": "cmd-go-1.25",
 	"go1.26.5":  "cmd-go-1.26",
 	"go1.26.6":  "cmd-go-1.26",
+	"go1.27.4":  "cmd-go-1.27",
 }
 
 func SelectDriver(v string, experimental bool) (Driver, error) {
@@ -29,7 +30,7 @@ func SelectDriver(v string, experimental bool) (Driver, error) {
 		return Driver{}, fmt.Errorf("unsupported Go version %q: need a numbered Go release >= 1.23", v)
 	}
 	if !experimental {
-		return Driver{}, fmt.Errorf("untested dry-run driver %s; tested versions: go1.25.12, go1.26.5, go1.26.6; select a tested toolchain or explicitly use -experimental-go", v)
+		return Driver{}, fmt.Errorf("untested dry-run driver %s; tested versions: go1.25.12, go1.26.5, go1.26.6, go1.27.4; select a tested toolchain or explicitly use -experimental-go", v)
 	}
 	return Driver{v, "cmd-go-experimental", true}, nil
 }

@@ -111,7 +111,7 @@ fixture = out/'fixture'
 shutil.copytree(repo/'tests/fixture',fixture,ignore=shutil.ignore_patterns('.drvgo*'))
 case('embed-cgo',fixture,'hello embedded world\nstable\nnested asset\n01 02 ff\nhidden asset\n')
 assembly = out/'assembly'
-write(assembly/'go.mod','module example.com/compat\ngo 1.23.0\n')
+write(assembly/'go.mod',f'module example.com/compat\ngo {version.removeprefix("go")}\n')
 write(assembly/'main.go','package main\nimport("fmt";"example.com/compat/asm")\nvar release="dev"\nfunc main(){fmt.Printf("%d %s %s\\n",asm.Answer(),mode,release)}\n')
 write(assembly/'default.go','//go:build !compat\n\npackage main\nconst mode="default"\n')
 write(assembly/'tagged.go','//go:build compat\n\npackage main\nconst mode="tagged"\n')

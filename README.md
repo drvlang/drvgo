@@ -31,7 +31,7 @@ Go's runtime stack traces remain available. Explicit `-w=false` preserves DWARF,
 including with `-s`; ordinary debug builds and experimental SDKs keep their
 existing compiler recipes. Stripped and debug builds use separate archive caches.
 
-The generated directory contains `default.nix`, `toolchain.nix`, `toolchain-builder.nix`, `runner.go`, `buildid.go`, `pack.go`, `pack.patch`, `scripts.nix`, `graph.json`, `evaluation.json`, `resolved-toolchain.nix`, and `sources/`. It can be moved or checked in and built without the original checkout, Go module cache, or this CLI. Its toolchain pin supports fetching the same tools on another machine. Nix's result symlink roots the built output against garbage collection.
+The generated directory contains `default.nix`, `toolchain.nix`, `toolchain-builder.nix`, `runner.go`, `buildid.go`, `pack.go`, the SDK-specific pack patches, `scripts.nix`, `graph.json`, `evaluation.json`, `resolved-toolchain.nix`, and `sources/`. It can be moved or checked in and built without the original checkout, Go module cache, or this CLI. Its toolchain pin supports fetching the same tools on another machine. Nix's result symlink roots the built output against garbage collection.
 
 The project also includes `devenv.nix`/`devenv.yaml`. The tested `nix-shell` entry point and generated builds use the same immutable nixpkgs revision. No directory trust or shell hooks are changed automatically.
 
@@ -116,12 +116,13 @@ releases or future minors have identical dry-run formats.
 | 1.25.12 | `toolchain-go1_25` | `cmd-go-1.25` | Linux amd64 |
 | 1.26.5 (default) | `toolchain-go1_26` | `cmd-go-1.26` | Linux amd64 |
 | 1.26.6 | `toolchain-go1_26_6` | `cmd-go-1.26` | Linux amd64 |
+| 1.27.4 | `toolchain-go1_27` | `cmd-go-1.27` | Linux amd64 |
 
 These outputs and the selectable `go` argument are newer than v0.1.0. From a
 checkout containing this change:
 
 ```sh
-tc=$(nix build .#toolchain-go1_25 --no-link --print-out-paths)
+tc=$(nix build .#toolchain-go1_27 --no-link --print-out-paths)
 ./bin/drvgo export -C /path/to/project -toolchain "$tc" .
 ```
 
@@ -130,7 +131,7 @@ For a flake consumer, pass a Go derivation to `mkGoPackage`, for example:
 ```nix
 drvgo.lib.mkGoPackage {
   system = "x86_64-linux";
-  go = drvgo.packages.x86_64-linux.toolchain-go1_25.go;
+  go = drvgo.packages.x86_64-linux.toolchain-go1_27.go;
   src = self;
   package = "./cmd/my-app";
   vendorHash = null;
@@ -177,13 +178,13 @@ To reproduce one matrix row:
 
 ```sh
 nix-shell --run 'make build; go test -c -tags integration -o /tmp/drvgo-integration.test ./internal/export'
-tc=$(nix build .#toolchain-go1_25 --no-link --print-out-paths)
+tc=$(nix build .#toolchain-go1_27 --no-link --print-out-paths)
 python3 tests/compatibility.py --toolchain "$tc" --drvgo bin/drvgo \
-  --integration-test /tmp/drvgo-integration.test --flake-toolchain toolchain-go1_25
+  --integration-test /tmp/drvgo-integration.test --flake-toolchain toolchain-go1_27
 ```
 
 The dynamic portion requires the features documented below. CI is configured for
-all three versions on Linux amd64 and arm64 and Apple Silicon macOS (`macos-15`),
+all four versions on Linux amd64 and arm64 and Apple Silicon macOS (`macos-15`),
 and gates future registry releases on those jobs. macOS builds use Nix’s Clang
 and pinned Apple SDK. The matrix also exercises C++ compilation and, on macOS,
 SDK framework linking and native arm64 Mach-O output. [Local results](tests/compatibility-results-2026-10-23.json) include

@@ -2,7 +2,10 @@
 , runnerSource ? builtins.toFile "drvgo-builder.go" (builtins.readFile ./runner.go)
 , buildidSource ? builtins.toFile "drvgo-buildid.go" (builtins.readFile ./buildid.go)
 , packSource ? builtins.toFile "drvgo-pack.go" (builtins.readFile ./pack.go)
-, packPatch ? builtins.toFile "drvgo-pack.patch" (builtins.readFile ./pack.patch)
+, packPatch ? builtins.toFile "drvgo-pack.patch" (
+    if pkgs.lib.versionAtLeast (go.version or "0") "1.27"
+    then builtins.readFile ./pack-go1.27.patch
+    else builtins.readFile ./pack.patch)
 , ccQuerySource ? builtins.toFile "drvgo-cc-query.c.in" (builtins.readFile ./cc-query.c.in)
 }:
 let

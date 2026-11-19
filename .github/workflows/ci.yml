@@ -35,7 +35,7 @@ jobs:
       fail-fast: false
       matrix:
         runner: [ubuntu-latest, ubuntu-24.04-arm, macos-15]
-        toolchain: [toolchain-go1_25, toolchain-go1_26, toolchain-go1_26_6]
+        toolchain: [toolchain-go1_25, toolchain-go1_26, toolchain-go1_26_6, toolchain-go1_27]
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
