@@ -55,4 +55,16 @@ To add a single package to existing flake outputs, pass the same source to `drvg
 
 For downloaded dependencies, set `vendorHash = "";`, build once, then use the hash Nix reports. Vendored and standard-library-only projects can omit it.
 
+### Multiple commands in one Go module
+
+Use `drvgo.lib.mkMonorepoFlake` in the example above with the module root as `src`. It discovers programs in `cmd/<name>/`. Each planner sees its own command and shared inputs such as `pkg/`, so editing a sibling command skips replanning. The same `go` and `vendorHash` options apply to every command.
+
+```sh
+nix build .#api
+nix run .#worker -- --help
+nix flake check                 # build every command on this system
+```
+
+If `cmd/` also contains Go libraries, set `commands = [ "api" "worker" ];` to identify the programs explicitly. Other directories remain available as shared inputs.
+
 [CC0-1.0 license](LICENSE)

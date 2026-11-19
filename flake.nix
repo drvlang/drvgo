@@ -9,6 +9,19 @@
       systems = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
       packageSets = forAllSystems (system: import nixpkgs { inherit system; });
+      commandFlake = commands: rec {
+        packages = forAllSystems (system:
+          builtins.mapAttrs (_: args: self.lib.mkGoPackage (args // { inherit system; })) commands);
+        apps = forAllSystems (system: builtins.mapAttrs (_: package: {
+          type = "app";
+          # Go determines the binary name during the build. Each result has one binary.
+          program = toString (packageSets.${system}.writeShellScript "drvgo-run" ''
+            if [[ -f ${package}/nix-support/no-tests ]]; then exit 0; fi
+            shopt -s dotglob
+            exec ${package}/bin/* "$@"
+          '');
+        }) packages.${system});
+      };
     in {
       packages = forAllSystems (system: rec {
         drvgo = import ./nix/package.nix { pkgs = packageSets.${system}; };
@@ -30,22 +43,10 @@
         drvgo = self.packages.${system}.drvgo;
       });
       # Publish the same project as the default package on each supported system.
-      lib.mkFlake = args: rec {
-        packages = forAllSystems (system: {
-          default = self.lib.mkGoPackage (args // { inherit system; });
-        });
-        apps = forAllSystems (system: let package = packages.${system}.default; in {
-          default = {
-            type = "app";
-            # Go determines the command name during the build. Each result has one binary.
-            program = toString (packageSets.${system}.writeShellScript "drvgo-run" ''
-              if [[ -f ${package}/nix-support/no-tests ]]; then exit 0; fi
-              shopt -s dotglob
-              exec ${package}/bin/* "$@"
-            '');
-          };
-        });
-      };
+      lib.mkFlake = args: commandFlake { default = args; };
+      lib.mkMonorepoFlake = args:
+        let outputs = commandFlake (import ./nix/monorepo.nix nixpkgs.lib args);
+        in outputs // { checks = outputs.packages; };
       lib.mkToolchain = { system, go ? packageSets.${system}.go }:
         import ./internal/export/templates/toolchain-builder.nix {
           pkgs = packageSets.${system};

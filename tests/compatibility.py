@@ -174,9 +174,10 @@ if a.flake_toolchain:
          '--flake-toolchain', a.flake_toolchain, '--out', out/'module-cache'])
     report['module_cache'] = json.loads((out/'module-cache/results.json').read_text())
     print(version, 'module-cache/offline/cgo/dynamic/reuse/checksum PASS', flush=True)
-    # The forwarding CLI is built with the default SDK regardless of the
-    # worker SDK; exercise many short-lived builders once per platform.
+    # Exercise flake discovery and the default forwarding CLI once per platform.
     if a.flake_toolchain == 'toolchain-go1_26':
+        run([sys.executable, repo/'tests/monorepo.py'])
+        print(version, 'monorepo/commands/shared-sources/cache-reuse PASS', flush=True)
         run([sys.executable, repo/'tests/forwarding.py', '--out', out/'forwarding'])
         report['forwarding'] = json.loads((out/'forwarding/results.json').read_text())
         print(version, 'native-forwarding/stress PASS', flush=True)
