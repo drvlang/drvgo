@@ -55,7 +55,8 @@ let
     export HOME="$TMPDIR" GOCACHE="$TMPDIR/cache" GOTOOLCHAIN=local CGO_ENABLED=0
     cp ${../internal/export/templates/test-selection.go} selection.go
     ${toolchain.go or toolchain}/bin/go build -p "$NIX_BUILD_CORES" -trimpath -ldflags='-s -w' \
-      -o "$out" selection.go
+      -o drvgo-test-selector selection.go
+    install -m 0555 drvgo-test-selector "$out"
   '';
   # These wrappers only run explicit tools; a stdenv setup and its dependency
   # closure are unnecessary on the planning and final forwarding paths.
