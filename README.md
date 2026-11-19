@@ -30,11 +30,17 @@ Add this `flake.nix` to your Go project. In a Git repository, stage it and the G
 ```nix
 {
   inputs.drvgo.url = "github:ryantm/drvgo";
-  outputs = { self, drvgo }: drvgo.lib.mkFlake {
-    src = self;
+  outputs = { drvgo, ... }: drvgo.lib.mkFlake {
+    src = builtins.path {
+      name = "go-source";
+      path = ./.;
+      filter = path: _: !(builtins.elem path (map toString [ ./docs ./flake.nix ./flake.lock ]));
+    };
   };
 }
 ```
+
+Exclude only paths your build never reads. Here, edits under `docs/` skip replanning. Keep embedded assets, native sources, and vendored dependencies. A self-contained module in a subdirectory can use `src = ./backend;`.
 
 The CLI works with ordinary flakes. For `mkFlake`, enable these additional settings in the client and daemon’s `nix.conf`.
 
@@ -45,7 +51,7 @@ extra-system-features = recursive-nix ca-derivations
 
 Use `nix build` to build, or `nix run . -- --help` to pass an argument to the command. For a command in a subdirectory, add `package = "./cmd/app";`. Set `go = "1.27.4";` to select a compiler. Both interfaces default to Go 1.26.5 and also support 1.25.12, 1.26.6, and 1.27.4.
 
-To add a single package to existing flake outputs, use `drvgo.lib.mkGoPackage { inherit system; src = self; }`.
+To add a single package to existing flake outputs, pass the same source to `drvgo.lib.mkGoPackage { inherit system src; }`.
 
 For downloaded dependencies, set `vendorHash = "";`, build once, then use the hash Nix reports. Vendored and standard-library-only projects can omit it.
 
