@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Exercise the same store restrictions as a sandboxed remote builder.
+export NIX_CONFIG="${NIX_CONFIG-}"$'\nsandbox = true\nallow-import-from-derivation = false'
 repo=$(cd "$(dirname "$0")/.." && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
