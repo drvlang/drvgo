@@ -74,3 +74,59 @@ func main() { fmt.Println("COMMAND", shared.Message, internal.Value, release, os
     write('app/api/entry.go', 'package main\nimport ("fmt"; "example.org/services/app/helper")\n'
           'func main() { fmt.Println(helper.Message) }\n')
     assert run_command('api') == 'shared'
+
+    # A test-only library outside app/ must fail the opt-in flake check.
+    project = project / 'botany'
+    project.mkdir()
+    write('go.mod', 'module example.org/botany\n\ngo 1.25\nignore ignored\n')
+    write('app/fern/main.go', 'package main\nfunc main() {}\n')
+    write('botany_test.go', 'package botany_test\nimport "testing"\nfunc TestRoot(t *testing.T) {}\n')
+    write('garden/soil_test.go', 'package garden\nimport "testing"\nfunc TestSoil(t *testing.T) { t.Fatal("bad soil") }\n')
+    write('garden/testdata/soil', 'loam')
+    write('garden/internal/seed/seed.go', 'package seed\nconst Kind = "fern"\n')
+    for subdir in ['garden/ignored', 'garden/.hidden', 'garden/_private', 'garden/testdata',
+                   'garden/vendor/dep', 'garden/nested']:
+        write(f'{subdir}/invalid_test.go', 'this is not valid Go\n')
+    write('garden/nested/go.mod', 'module example.org/nested\n\ngo 1.25\n')
+    botany = '''{
+      inputs.drvgo.url = "github:drvlang/drvgo";
+      outputs = { drvgo, ... }: drvgo.lib.mkMonorepoFlake {
+        commands.fern = "app/fern";
+        src = drvgo.lib.projectSource { root = ./.; files = [ ./go.mod ./botany_test.go ./app ./garden ]; };
+        moduleTests = ENABLED;
+      };
+    }'''
+
+    def outputs(attr):
+        return json.loads(nix('eval', *flags, '--json', f'.#{attr}.{system}', '--apply', 'builtins.attrNames'))
+
+    write('flake.nix', botany.replace('ENABLED', 'false'))
+    assert outputs('checks') == ['fern']
+    nix('flake', 'check', *flags)
+    write('flake.nix', botany.replace('ENABLED', 'true'))
+    assert outputs('apps') == outputs('packages') == ['fern']
+    assert outputs('checks') == ['fern', 'module-tests', 'module-tests/garden',
+                                 'module-tests/garden/ignored', 'module-tests/garden/internal/seed']
+    failure = subprocess.run(['nix', 'flake', 'check', '-L', *flags], cwd=project, text=True,
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    assert failure.returncode != 0 and 'TestSoil' in failure.stdout and 'bad soil' in failure.stdout, failure.stdout
+    write('garden/soil_test.go', '''package garden
+import ("os"; "testing"; "example.org/botany/garden/internal/seed")
+func TestSoil(t *testing.T) {
+    soil, err := os.ReadFile("testdata/soil")
+    if err != nil || string(soil) != "loam" || seed.Kind != "fern" { t.Fatal("bad soil") }
+}
+''')
+    nix('flake', 'check', *flags)
+
+    scoped = botany.replace('ENABLED', '''true;
+        srcForTarget = { name, target }: drvgo.lib.projectSource {
+          root = ./.;
+          files = [ ./go.mod ] ++ (if target == "." then [ ./botany_test.go ] else [ (./. + "/${target}") ]);
+        }''')
+    write('flake.nix', scoped)
+    garden_check = f'.#checks.{system}.module-tests/garden'
+    recipe = nix('eval', *flags, '--raw', garden_check + '.drvPath')
+    write('app/fern/main.go', 'package main\nfunc main() { println("fern") }\n')
+    assert nix('eval', *flags, '--raw', garden_check + '.drvPath') == recipe
+    nix('build', *flags, '--no-link', garden_check)

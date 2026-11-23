@@ -83,8 +83,8 @@ func run(args []string) error {
 	command := args[0]
 	var opts exporter.Options
 	if command == "internal-export" {
-		// Only the Nix planner supplies a selector built with its chosen SDK.
 		opts.TestSelector = os.Getenv("testSelector")
+		opts.ModuleTest = os.Getenv("moduleTest") == "1"
 		command = "export"
 	}
 	if command != "build" && command != "export" && command != "run" && command != "test" {

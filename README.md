@@ -70,4 +70,17 @@ If `app/` also contains Go libraries, set `commands = [ "api" "worker" ];` to id
 
 For per-command source lists, set `srcForTarget = { name, target }: ...;` to return a `projectSource` containing the selected command, shared code and root manifests. With an explicit `commands` map, you can omit the project-wide `src`.
 
+Set `moduleTests = true;` in `mkMonorepoFlake` to include library and test-only packages in `nix flake check`. This example checks the command in `app/fern` and the tests in `garden/soil_test.go`.
+
+```nix
+drvgo.lib.mkMonorepoFlake {
+  moduleTests = true;
+  src = drvgo.lib.projectSource { root = ./.; files = [ ./go.mod ./app ./garden ]; };
+}
+```
+
+Run the garden tests alone with `nix build .#checks.x86_64-linux.module-tests/garden`. Commands keep their usual check names. Other package checks use `module-tests/<directory>`, or `module-tests` for the module root.
+
+The option requires a module-wide `src` containing `go.mod`. Discovery skips nested modules, vendor, testdata, and hidden or underscore-prefixed directories. Go applies build constraints and module ignore rules at build time, so excluded candidates can appear as empty checks. With `srcForTarget`, each additional check passes its check name and module-relative directory to the callback.
+
 [CC0-1.0 license](LICENSE)

@@ -26,6 +26,7 @@ type Options struct {
 	ExperimentalGo                                                        bool
 	Test                                                                  bool
 	AllowEmptyTests                                                       bool
+	ModuleTest                                                            bool   // Candidate discovered by mkMonorepoFlake for the module's ./... pattern.
 	TestSelector                                                          string // Prebuilt with the selected SDK by the dynamic planner.
 	Race                                                                  bool
 	CGOEnabled                                                            *bool

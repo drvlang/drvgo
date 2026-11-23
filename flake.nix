@@ -11,11 +11,11 @@
       forAllSystems = nixpkgs.lib.genAttrs systems;
       ca = { __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256"; };
       packageSets = forAllSystems (system: import nixpkgs { inherit system; });
-      commandFlake = commands: rec {
+      commandFlake = { commands, tests ? commands }: {
         packages = forAllSystems (system:
           builtins.mapAttrs (_: args: self.lib.mkGoPackage (args // { inherit system; })) commands);
         checks = forAllSystems (system:
-          builtins.mapAttrs (_: args: self.lib.mkTest (args // { inherit system; })) commands);
+          builtins.mapAttrs (_: args: self.lib.mkTest (args // { inherit system; })) tests);
         apps = forAllSystems (system:
           builtins.mapAttrs (_: args: self.lib.mkApp (args // { inherit system; })) commands);
       };
@@ -42,10 +42,15 @@
         inherit (self.packages.${system}) bench;
       });
       # Publish the same project as the default package on each supported system.
-      lib.mkFlake = args: commandFlake { default = args; };
-      lib.mkMonorepoFlake = args:
-        let outputs = commandFlake (import ./nix/monorepo.nix nixpkgs.lib args);
-        in outputs;
+      lib.mkFlake = args: commandFlake { commands.default = args; };
+      lib.mkMonorepoFlake = { moduleTests ? false, ... }@args:
+        let
+          project = removeAttrs args [ "moduleTests" ];
+          commands = import ./nix/monorepo.nix nixpkgs.lib project;
+        in commandFlake {
+          inherit commands;
+          tests = if moduleTests then import ./nix/module-tests.nix nixpkgs.lib project commands else commands;
+        };
       lib.mkToolchain = { system, go ? packageSets.${system}.go }:
         import ./internal/export/templates/toolchain-builder.nix {
           pkgs = packageSets.${system};

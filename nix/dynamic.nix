@@ -6,7 +6,7 @@
 }:
 { src, package ? ".", vendorHash ? null, moduleProxy ? "https://proxy.golang.org", tags ? "", ldflags ? "", name ? "drvgo"
 , experimentalGo ? false, test ? false, race ? false, cgoEnabled ? null
-, allowPlannerSubstitutes ? true, allowEmptyTests ? false
+, allowPlannerSubstitutes ? true, allowEmptyTests ? false, moduleTest ? false
 , runtimeInputs ? []
 , previousPlan ? null
 , moduleCache ? null
@@ -124,6 +124,8 @@ let
     '';
   } // lib.optionalAttrs allowEmptyTests {
     inherit testSelector;
+  } // lib.optionalAttrs moduleTest {
+    moduleTest = "1";
   } // lib.optionalAttrs (runtimeInputs != []) {
     # Literal paths in an existing checkout have no Nix string context.
     # Make their data available to the restricted recursive store; the graph

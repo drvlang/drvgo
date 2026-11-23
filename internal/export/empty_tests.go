@@ -10,28 +10,56 @@ import (
 	"strconv"
 )
 
-func emptyTestSelection(dir string, env []string, goBin string, flags []string, o Options) (bool, error) {
-	// -find resolves a single directory without traversing dependencies. -e
-	// permits inspecting an excluded directory; it is not used to suppress
-	// failures: the selected compiler's typed go/build result decides eligibility.
+type testPackage struct {
+	Dir                                          string
+	GoFiles, CgoFiles, TestGoFiles, XTestGoFiles []string
+	Error                                        *struct{ Err string }
+}
+
+func listTestPackage(dir string, env []string, goBin string, flags []string, o Options) (*testPackage, error) {
+	pattern := o.Package
+	if o.ModuleTest {
+		// An explicit directory ignores go.mod's ignore directives. Match a
+		// wildcard rooted there, and select only the directory itself.
+		pattern += "/..."
+	}
 	args := append([]string{"list", "-e", "-find", "-json"}, flags...)
-	args = append(args, o.Package)
+	args = append(args, pattern)
 	data, err := run(dir, env, goBin, args...)
+	if err != nil {
+		return nil, err
+	}
+	d := json.NewDecoder(bytes.NewReader(data))
+	for {
+		var p testPackage
+		err := d.Decode(&p)
+		if o.ModuleTest && err == io.EOF {
+			return nil, nil // Go excluded this directory for the module or platform.
+		}
+		if err != nil || p.Dir == "" {
+			return nil, fmt.Errorf("resolve test package %s: %s", o.Package, data)
+		}
+		if o.ModuleTest {
+			if p.Dir != filepath.Join(dir, o.Package) {
+				continue
+			}
+		} else {
+			var extra any
+			if err := d.Decode(&extra); err != io.EOF {
+				return nil, fmt.Errorf("allow-empty-tests requires exactly one package")
+			}
+		}
+		return &p, nil
+	}
+}
+
+func emptyTestSelection(dir string, env []string, goBin string, flags []string, o Options) (bool, error) {
+	p, err := listTestPackage(dir, env, goBin, flags, o)
 	if err != nil {
 		return false, err
 	}
-	var p struct {
-		Dir                                          string
-		GoFiles, CgoFiles, TestGoFiles, XTestGoFiles []string
-		Error                                        *struct{ Err string }
-	}
-	d := json.NewDecoder(bytes.NewReader(data))
-	if err := d.Decode(&p); err != nil || p.Dir == "" {
-		return false, fmt.Errorf("resolve exactly one test package: %s", data)
-	}
-	var extra any
-	if err := d.Decode(&extra); err != io.EOF {
-		return false, fmt.Errorf("allow-empty-tests requires exactly one package")
+	if p == nil {
+		return true, nil
 	}
 	var selected struct{ Tests, Sources bool }
 	selected.Tests = len(p.TestGoFiles)+len(p.XTestGoFiles) > 0
@@ -62,7 +90,7 @@ func emptyTestSelection(dir string, env []string, goBin string, flags []string, 
 			selector = goBin
 			args = append([]string{"run", helper}, args...)
 		}
-		data, err = run(dir, env, selector, args...)
+		data, err := run(dir, env, selector, args...)
 		if err != nil {
 			return false, err
 		}
