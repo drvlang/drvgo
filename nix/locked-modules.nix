@@ -72,6 +72,7 @@ let
             members = map (member a) (builtins.fromJSON (builtins.readFile (./. + "/members-" + toString i + ".json")));
           }) artifacts;
         in builtins.derivation {
+          __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256";
           name = "drvgo-locked-proxy"; system = "${system}";
           builder = "''${drvgo}/bin/drvgo";
           args = [ "internal-module-proxy" (pkgs.writeText "drvgo-proxy.json" (builtins.toJSON plan)) (builtins.placeholder "out") ];
@@ -88,6 +89,6 @@ in if lib.isDerivation src then dynamic {
           inherit pkgs; drvgo = builtins.storePath "${drvgo}"; dynamicFile = ${dynamicFile};
           src = builtins.storePath "${src}"; moduleProxy = builtins.readFile ${pkgs.writeText "drvgo-proxy-url" moduleProxy};
         };
-    in if proxy == null then pkgs.runCommand "drvgo-empty-proxy" {} "mkdir $out" else proxy
+    in if proxy == null then pkgs.runCommand "drvgo-empty-proxy" { __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256"; } "mkdir $out" else proxy
   '';
 } else fromSource (toString src)

@@ -4,7 +4,7 @@
 , cgoEnabled ? null, test ? false, allowEmptyTests ? false, tags ? "", race ? false
 , runtimeInputs ? [], ldflags ? ""
 , moduleCache ? null
-, exportData ? false, earlyCutoff ? false
+, exportData ? true, earlyCutoff ? null
 , baseToolchain ? import ../internal/export/templates/toolchain.nix
 }:
 (import ../nix/dynamic.nix { toolchain = baseToolchain; }) {

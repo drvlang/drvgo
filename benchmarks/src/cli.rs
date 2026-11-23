@@ -61,10 +61,6 @@ pub struct Ci {
     pub after_iets: Option<PathBuf>,
     #[arg(long)]
     pub after_prepare_modules: bool,
-    #[arg(long)]
-    pub after_export_data: bool,
-    #[arg(long)]
-    pub after_early_cutoff: bool,
     #[arg(long, default_value = ".")]
     pub package: String,
     #[arg(long, value_parser = ["0", "1"])]
@@ -137,10 +133,6 @@ pub struct Evaluation {
     pub before_iets: Option<PathBuf>,
     #[arg(long)]
     pub after_iets: Option<PathBuf>,
-    #[arg(long)]
-    pub after_export_data: bool,
-    #[arg(long)]
-    pub after_early_cutoff: bool,
     #[arg(long, value_parser = positive, default_value_t = 7)]
     pub runs: usize,
     #[arg(long)]
@@ -256,7 +248,7 @@ pub enum Suite {
     Closure(Closure),
     /// Compare Nix and iets evaluation of exported graphs or dynamic helpers, without builds.
     Evaluation(Evaluation),
-    /// Measure private-edit rebuilds with full archives, interfaces and early cutoff.
+    /// Measure private-edit rebuilds with full archives and the default compact interfaces.
     ExportData(ExportData),
     /// Compare export + Nix evaluation, excluding compilation and graph inspection.
     Export(Export),

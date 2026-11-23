@@ -1,5 +1,6 @@
 { pkgs }:
 pkgs.buildGoModule {
+  __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256";
   pname = "drvgo";
   version = "0.1.0";
   src = pkgs.lib.fileset.toSource {

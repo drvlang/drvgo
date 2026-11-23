@@ -88,12 +88,8 @@ func TestEmbeddedAssetsAndCacheIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(resolved), "builtins.appendContext") {
+	if !strings.Contains(string(resolved), "builtins.outputOf") && !strings.Contains(string(resolved), "builtins.appendContext") {
 		t.Fatal("resolved toolchain fast path was not generated")
-	}
-	fallback := strings.ReplaceAll(string(resolved), "if builtins.pathExists path && builtins.pathExists drv then", "if false then")
-	if err = os.WriteFile(resolvedFile, []byte(fallback), 0644); err != nil {
-		t.Fatal(err)
 	}
 	defaultTC, err := Toolchain()
 	if err != nil {
@@ -124,10 +120,14 @@ func TestEmbeddedAssetsAndCacheIsolation(t *testing.T) {
 		if u.Binary || strings.Contains(u.Name, "cgo") {
 			want = strings.TrimSpace(string(nativePath))
 		}
-		b, err := exec.Command("nix-store", "--query", "--binding", "toolchainInput", before[u.ID]).CombinedOutput()
+		b, err := exec.Command("nix", "build", "--no-link", "--print-out-paths", "--impure", "--expr", "(import "+out+" {}).units."+u.ID+".toolchainInput").Output()
 		if err != nil || strings.TrimSpace(string(b)) != want {
 			t.Fatalf("%s toolchain: got %s, want %s (%v)", u.Name, b, want, err)
 		}
+	}
+	fallback := strings.ReplaceAll(string(resolved), "if builtins.pathExists path && builtins.pathExists drv then", "if false then")
+	if err = os.WriteFile(resolvedFile, []byte(fallback), 0644); err != nil {
+		t.Fatal(err)
 	}
 	if selectedTC == "" || selectedTC == defaultTC {
 		for id, d := range derivations() {

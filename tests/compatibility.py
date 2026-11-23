@@ -82,14 +82,13 @@ def case(name, source, expected, tags='', ldflags='', cgo=None, race=False):
     # Check the optional archive layouts against the same native Go executable,
     # including assembly, race, cgo, external linking, C++, workspaces and tags.
     # All tool inputs are warm from the default build immediately above.
-    for cutoff in [False, True]:
-        mode = 'cutoff' if cutoff else 'interfaces'
+    for mode, archive_options in [('full', 'exportData = false;'), ('interfaces', '')]:
         compact = json.loads(run(['nix', 'build', '--no-link', '--json', '--impure',
             '--extra-experimental-features', 'nix-command ca-derivations',
             '--option', 'allow-import-from-derivation', 'false', '--option', 'sandbox', 'true',
             '--option', 'sandbox-fallback', 'false', '--option', 'substituters', '',
             '--option', 'always-allow-substitutes', 'false', '--max-jobs', '4', '--cores', '2',
-            '--expr', f'(import {export} {{ exportData = true; earlyCutoff = {str(cutoff).lower()}; }}).default']).stdout)
+            '--expr', f'(import {export} {{ {archive_options} }}).default']).stdout)
         compact_output = compact[0]['outputs']['out']
         assert run([Path(compact_output)/'bin'/graph['binaryName']]).stdout.decode() == normal, (name, mode)
         compact_modes[mode] = compact_output

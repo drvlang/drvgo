@@ -9,6 +9,7 @@
     let
       systems = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
+      ca = { __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256"; };
       packageSets = forAllSystems (system: import nixpkgs { inherit system; });
       commandFlake = commands: rec {
         packages = forAllSystems (system:
@@ -56,16 +57,16 @@
       lib.mkPackage = self.lib.mkGoPackage;
       lib.mkApp = { system, ... }@args: let package = self.lib.mkGoPackage args; in {
         type = "app";
-        program = toString (packageSets.${system}.writeShellScript "drvgo-run" ''
+        program = toString ((packageSets.${system}.writeShellScript "drvgo-run" ''
           if [[ -f ${package}/nix-support/no-tests ]]; then exit 0; fi
           shopt -s dotglob
           exec ${package}/bin/* "$@"
-        '');
+        '').overrideAttrs (_: ca));
       };
       lib.mkTest = { system, src, package ? ".", target ? package, ... }@args:
         let pkgs = packageSets.${system};
             tests = self.lib.mkGoPackage (args // { test = true; allowEmptyTests = true; });
-        in pkgs.runCommand "drvgo-tests" {} ''
+        in pkgs.runCommand "drvgo-tests" ca ''
           if [[ ! -f ${tests}/nix-support/no-tests ]]; then
             cp -r ${src} project
             chmod -R u+w project

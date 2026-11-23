@@ -52,8 +52,7 @@ def main():
 
     system = run(["nix", "eval", "--impure", "--raw", "--expr", "builtins.currentSystem"], "system")
     tc_expr = f'(builtins.getFlake {nix_string(repo)}).packages.{system}.{args.flake_toolchain}'
-    for cutoff in [False, True]:
-        mode = "cutoff" if cutoff else "interfaces"
+    for mode in ["default", "legacy-arguments"]:
         source = out / mode
         module = f"example.com/exportdata/{mode}"
         write(source, "go.mod", f"module {module}\ngo 1.25\n")
@@ -65,7 +64,7 @@ def main():
             write(source, f"{package}/value.go", f'package {package}\nimport "{module}/{previous}"\nfunc Value() int {{ return {previous}.Value() }}\n')
             previous = package
         write(source, "main.go", f'package main\nimport ("fmt"; "{module}/{previous}")\nfunc main() {{ fmt.Println({previous}.Value()) }}\n')
-        options = f'exportData = true; earlyCutoff = {str(cutoff).lower()};'
+        options = '' if mode == 'default' else 'exportData = true; earlyCutoff = false;'
 
         def exported(selected_source, label, failure=None, extra=()):
             graph = out / (mode + "-" + label + "-export")
@@ -81,6 +80,9 @@ def main():
             data = json.loads((graph / "graph.json").read_text())
             outputs = {u["name"]: built[drvs[u["id"]]] for u in data["units"]}
             root = built[drvs[data["root"]]]["out"]
+            selected = {root} | {path for name, unit in outputs.items() if name.startswith(module) for path in unit.values()}
+            info = json.loads(run(["nix", "path-info", "--json", *sorted(selected)], mode + "-" + label + "-ca"))
+            assert all(info[path]["ca"].startswith("fixed:r:sha256:") for path in selected)
             return root, outputs, data["binaryName"]
 
         records = []
@@ -96,10 +98,10 @@ def main():
             if records:
                 changed = {name for name, value in outputs.items() if value["out"] != records[-1]["outputs"][name]["out"]}
                 own = {name for name in outputs if name.startswith(module)}
-                expected_changes = {module, module + "/dep"} if cutoff and label == "private" else own
+                expected_changes = {module, module + "/dep"} if label == "private" else own
                 assert changed == expected_changes, (mode, label, changed, expected_changes)
                 changed_api = {name for name, value in outputs.items() if value.get("api") != records[-1]["outputs"][name].get("api")}
-                if cutoff and label == "private":
+                if label == "private":
                     assert not changed_api, changed_api
                 else:
                     assert changed_api == own - {module}, changed_api
@@ -127,7 +129,7 @@ def main():
         for race in [False, True]:
             label = "test-race" if race else "test"
             test_result, _, test_binary = exported(native, label, extra=["-test", *(["-race"] if race else [])])
-            test_expression = dynamic_expr.replace(options, options + f" test = true; race = {str(race).lower()};")
+            test_expression = dynamic_expr.removesuffix("}") + f"test = true; race = {str(race).lower()}; }}"
             built = json.loads(run(["nix", "build", *flags, "--impure", "--no-link", "--json", "--expr", test_expression], mode + "-" + label + "-dynamic"))
             assert str(Path(built[0]["outputs"]["out"]).resolve()) == test_result
             output = run([Path(test_result) / "bin" / test_binary, "-test.v"], mode + "-" + label + "-run")

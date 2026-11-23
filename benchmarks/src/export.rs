@@ -4,25 +4,30 @@ use anyhow::ensure;
 pub fn build(a: Build) -> Result<()> {
     let out = empty_dir(a.out.as_deref(), "drvgo-rebuild-")?;
     let roots = paths(&a.before, &a.after)?;
-    let flags = argv!["--no-out-link", "--max-jobs", "4", "--cores", "2"];
-    let mut report = json!({"scope":"Rebuild every package with nix-build --check; warm tools, sources, and dependency outputs. No network transfer.","nix":version()?,"flags":flags,"roots":roots});
-    let make = |label: &str, check: bool| -> Result<_> {
+    let session = nonce()?;
+    let flags = argv!["--no-link", "--impure", "--max-jobs", "4", "--cores", "2"];
+    let mut report = json!({"scope":"Force each package recipe with a fresh trial input; warm tools, sources, and dependency outputs. No network transfer.","nix":version()?,"flags":flags,"roots":roots});
+    let make = |label: &str, trial: Option<usize>| -> Result<_> {
         let expr = format!(
             "builtins.attrValues (import (builtins.toPath {}) {{}}).units",
             quote_path(&roots[label])?
         );
-        let mut cmd = argv!["nix-build"];
+        let expr = match trial {
+            Some(trial) => format!(
+                "map (d: builtins.derivation (d.drvAttrs // {{ drvgoTrial = {}; }})) ({expr})",
+                nix_string(&format!("{session}-{label}-{trial}"))
+            ),
+            None => expr,
+        };
+        let mut cmd = argv!["nix", "build"];
         cmd.extend_from_slice(&flags);
-        if check {
-            cmd.push("--check".into());
-        }
         cmd.extend(argv!["--expr", expr]);
         Ok(cmd)
     };
     for label in LABELS {
         ensure!(
             combined(
-                &mut command(&make(label, false)?),
+                &mut command(&make(label, None)?),
                 &log_file(&out, &format!("{label}-prepare.log"))?
             )?
             .success(),
@@ -31,7 +36,7 @@ pub fn build(a: Build) -> Result<()> {
     }
     for trial in 0..=a.runs {
         for label in alternating(&LABELS, trial) {
-            let cmd = make(label, true)?;
+            let cmd = make(label, Some(trial))?;
             let log = log_file(&out, &format!("{label}-{trial}.log"))?;
             let (s, time) = measured(|| combined(&mut command(&cmd), &log))?;
             ensure!(s.success(), "rebuild failed");

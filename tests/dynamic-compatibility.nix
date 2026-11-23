@@ -4,7 +4,7 @@
 , package ? ".", ldflags ? ""
 , runtimeInputs ? []
 , moduleCache ? null, prepareModules ? false
-, exportData ? false, earlyCutoff ? false
+, exportData ? true, earlyCutoff ? null
 }:
 let
   drvgo = builtins.getFlake (toString ../.);

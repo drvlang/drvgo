@@ -20,29 +20,17 @@ fn store_option(name: &str, path: Option<&Path>) -> Result<String> {
 pub(crate) fn expr(repo: &Path, source: &Path, package: &str, attrs: &str) -> Result<String> {
     Ok(format!("(import (builtins.toPath {}) {{}}) {{ src = builtins.path {{ path = {}; name = \"source\"; }}; package = {}; {attrs} }}",quote_path(&repo.join("nix/dynamic.nix"))?,quote_path(source)?,nix_string(package)))
 }
-fn after_options(after: bool, prepare: bool, data: bool, cut: bool) -> String {
-    let mut s = String::new();
-    if after {
-        for (enabled, k) in [
-            (prepare, "prepareModules"),
-            (data, "exportData"),
-            (cut, "earlyCutoff"),
-        ] {
-            if enabled {
-                s.push_str(&format!("{k} = true; "));
-            }
-        }
+fn after_options(after: bool, prepare: bool) -> &'static str {
+    if after && prepare {
+        "prepareModules = true; "
+    } else {
+        ""
     }
-    s
 }
 pub fn ci(a: Ci) -> Result<()> {
     ensure!(
         !a.allow_empty_tests || a.test,
         "--allow-empty-tests requires --test"
-    );
-    ensure!(
-        !a.after_early_cutoff || a.after_export_data,
-        "--after-early-cutoff requires --after-export-data"
     );
     let out = empty_dir(a.out.as_deref(), "drvgo-ci-")?;
     let roots = paths(&a.before, &a.after)?;
@@ -78,7 +66,7 @@ pub fn ci(a: Ci) -> Result<()> {
     if !a.tags.is_empty() {
         common.push_str(&string_option("tags", Some(&a.tags)));
     }
-    let mut report = json!({"scope":"Dynamic evaluation and realization with fresh planners and warm package outputs","source":src,"package":a.package,"vendor_hash":a.vendor_hash,"after_module_cache":a.after_module_cache,"module_cache":a.module_cache,"previous_plan":a.previous_plan,"after_previous_plan":a.after_previous_plan,"before_iets":a.before_iets,"after_iets":a.after_iets,"after_prepare_modules":a.after_prepare_modules,"after_export_data":a.after_export_data,"after_early_cutoff":a.after_early_cutoff,"cgo":a.cgo,"test":a.test,"allow_empty_tests":a.allow_empty_tests,"tags":a.tags,"ldflags":a.ldflags,"nix":version()?,"roots":roots,"flags":flags,"nonce":nonce});
+    let mut report = json!({"scope":"Dynamic evaluation and realization with fresh planners and warm package outputs","source":src,"package":a.package,"vendor_hash":a.vendor_hash,"after_module_cache":a.after_module_cache,"module_cache":a.module_cache,"previous_plan":a.previous_plan,"after_previous_plan":a.after_previous_plan,"before_iets":a.before_iets,"after_iets":a.after_iets,"after_prepare_modules":a.after_prepare_modules,"cgo":a.cgo,"test":a.test,"allow_empty_tests":a.allow_empty_tests,"tags":a.tags,"ldflags":a.ldflags,"nix":version()?,"roots":roots,"flags":flags,"nonce":nonce});
     let mut expected = BTreeMap::new();
     for trial in 0..=a.runs {
         for label in alternating(&LABELS, trial) {
@@ -115,12 +103,7 @@ pub fn ci(a: Ci) -> Result<()> {
                     a.before_iets.as_deref()
                 },
             )?;
-            opts += &after_options(
-                after,
-                a.after_prepare_modules,
-                a.after_export_data,
-                a.after_early_cutoff,
-            );
+            opts += after_options(after, a.after_prepare_modules);
             let expression = expr(&roots[label], &src, &a.package, &opts)?;
             let mut row = graph_build(
                 &expression,
@@ -238,10 +221,6 @@ pub fn client(a: Client) -> Result<()> {
 }
 pub fn evaluation(a: Evaluation) -> Result<()> {
     ensure!(
-        !a.after_early_cutoff || a.after_export_data,
-        "early cutoff requires export data"
-    );
-    ensure!(
         a.dynamic_source.is_some()
             || (a.vendor_hash.is_none()
                 && a.module_cache.is_none()
@@ -264,16 +243,11 @@ pub fn evaluation(a: Evaluation) -> Result<()> {
             cases.push((l, c));
         }
     }
-    let mut report = json!({"scope":"Warm evaluation, no builds, tracing cache and fallback disabled","dynamic_source":src,"package":a.package,"vendor_hash":a.vendor_hash,"module_cache":a.module_cache,"before_iets":a.before_iets,"after_iets":a.after_iets,"after_export_data":a.after_export_data,"after_early_cutoff":a.after_early_cutoff,"roots":roots});
+    let mut report = json!({"scope":"Warm evaluation, no builds, tracing cache and fallback disabled","dynamic_source":src,"package":a.package,"vendor_hash":a.vendor_hash,"module_cache":a.module_cache,"before_iets":a.before_iets,"after_iets":a.after_iets,"roots":roots});
     let mut expected = BTreeMap::new();
     for trial in 0..=a.runs {
         for (label, client) in alternating(&cases, trial) {
-            let mut opts = after_options(
-                label == "after",
-                false,
-                a.after_export_data,
-                a.after_early_cutoff,
-            );
+            let mut opts = String::new();
             let (expr, features) = if let Some(src) = &src {
                 opts += &string_option("vendorHash", a.vendor_hash.as_deref());
                 opts += &store_option("moduleCache", a.module_cache.as_deref())?;

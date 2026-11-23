@@ -108,11 +108,11 @@ func exportEmptyTests(out, tc, version string, g *Graph) (*Graph, error) {
 	if err != nil {
 		return nil, err
 	}
-	expression := `{ toolchain ? import ./resolved-toolchain.nix, exportData ? false, earlyCutoff ? false }:
-assert !earlyCutoff || exportData;
+	expression := `{ toolchain ? import ./resolved-toolchain.nix, exportData ? true, earlyCutoff ? null }:
 { units = {}; default = builtins.derivation {
 name = "go-empty-tests"; system = ` + nixString(g.System) + `;
 builder = "${toolchain.compile or toolchain}/bin/drvgo-builder";
+__contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256";
 emptyTests = "1";
 }; }
 `

@@ -5,6 +5,7 @@
 let
   target = "${pkgs.stdenv.hostPlatform.go.GOOS}_${pkgs.stdenv.hostPlatform.go.GOARCH}";
 in pkgs.runCommand "go-libnix-planning-toolchain" {
+  __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256";
   disallowedReferences = [ go ];
 } ''
   mkdir -p $out/bin $out/share/go/bin $out/share/go/pkg/tool/${target}

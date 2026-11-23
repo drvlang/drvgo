@@ -9,10 +9,13 @@
 , ccQuerySource ? builtins.toFile "drvgo-cc-query.c.in" (builtins.readFile ./cc-query.c.in)
 }:
 let
+  ca = { __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256"; };
+  command = name: attrs: pkgs.runCommand name (attrs // ca);
+  join = attrs: (pkgs.symlinkJoin attrs).overrideAttrs (_: ca);
   target = "${pkgs.stdenv.hostPlatform.go.GOOS}_${pkgs.stdenv.hostPlatform.go.GOARCH}";
   # Copy executables instead of symlinking the SDK: workers do not need the
   # driver, documentation, other tools, or the entire standard-library source.
-  tools = names: pkgs.runCommand "go-libnix-${builtins.concatStringsSep "-" names}" {
+  tools = names: command "go-libnix-${builtins.concatStringsSep "-" names}" {
     disallowedReferences = [ go ];
   } ''
     mkdir -p $out/share/go/pkg/tool/${target}
@@ -30,7 +33,7 @@ let
       "${builtins.unsafeDiscardStringContext (toString go)}/share/go/src/cmd/drvgo-builder/pack-upstream.go" = "@DRVGO_PACK_SOURCE@";
     };
   });
-  helpers = pkgs.runCommand "go-libnix-helpers" {
+  helpers = command "go-libnix-helpers" {
     nativeBuildInputs = [ go ];
     disallowedReferences = [ go ];
   } ''
@@ -45,11 +48,11 @@ let
     go build -trimpath -ldflags='-s -w' -tags drvgo_toolchain \
       -overlay "$TMPDIR/overlay.json" -o $out/bin/drvgo-builder cmd/drvgo-builder
   '';
-  compile = pkgs.symlinkJoin {
+  compile = join {
     name = "go-libnix-compile-toolchain";
     paths = [ helpers (tools [ "compile" "asm" ]) ];
   };
-  link = pkgs.symlinkJoin {
+  link = join {
     name = "go-libnix-link-toolchain";
     paths = [ compile (tools [ "link" ]) ];
   };
@@ -66,7 +69,7 @@ let
   # runtime archives but do not need its compiler, assembler, or external linker.
   queryArchArgs = if pkgs.stdenv.hostPlatform.isDarwin then [ "-arch" "arm64" ]
     else if pkgs.stdenv.hostPlatform.isx86_64 then [ "-m64" ] else [];
-  internalLinkSupport = pkgs.runCommand "go-libnix-internal-link-support" {
+  internalLinkSupport = command "go-libnix-internal-link-support" {
     disallowedReferences = [ cc cc.cc ];
   } ''
     mkdir -p $out/bin $out/lib $out/nix-support
@@ -92,7 +95,7 @@ let
     query --print-file-name=libc_nonshared.a libc_nonshared
     query --print-file-name=libssp_nonshared.a libssp_nonshared
   '';
-  internalLink = pkgs.symlinkJoin {
+  internalLink = join {
     name = "go-libnix-internal-link-toolchain";
     paths = [ link internalLinkSupport ];
   };
@@ -103,7 +106,7 @@ let
     && (cc.cc.outputName or "out") == "out" then
     let
       gcc = cc.cc;
-      copied = pkgs.runCommand gcc.name {
+      copied = command gcc.name {
         disallowedReferences = [ gcc ];
       } ''
         export LC_ALL=C
@@ -145,7 +148,7 @@ let
       gccForLibs = compact;
     })
   else cc;
-  native = pkgs.symlinkJoin {
+  native = join {
     name = "go-libnix-native-toolchain";
     # Replay handles file operations itself. The compiler wrappers retain their
     # own runtime utilities; pkg-config dependencies are unsupported.
@@ -154,7 +157,7 @@ let
       ln -s ${pkgs.lib.getBin pkgs.stdenv.cc.bintools.bintools}/bin/dsymutil $out/bin/dsymutil
     '';
   };
-in pkgs.symlinkJoin {
+in join {
   name = "go-libnix-toolchain";
   passthru = { inherit pkgs go compile link native internalLink; };
   # Only discovery uses cmd/go and the complete SDK. The generated graph

@@ -5,7 +5,8 @@
 let
   toolchain = import ../../internal/export/templates/toolchain.nix;
   pkgs = toolchain.pkgs;
-  database = pkgs.runCommand "upm-pypi-map" {} ''
+  ca = { __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256"; };
+  database = pkgs.runCommand "upm-pypi-map" ca ''
     mkdir -p $out
     ${generator}/bin/gen_pypi_map gen \
       -out "$out/pypi_map.sqlite" \
@@ -15,7 +16,7 @@ let
     # The upstream generator can report errors without a failing exit status.
     test -s "$out/pypi_map.sqlite"
   '';
-  package = pkgs.runCommand "upm-drvgo" { nativeBuildInputs = [ pkgs.makeWrapper ]; } ''
+  package = pkgs.runCommand "upm-drvgo" (ca // { nativeBuildInputs = [ pkgs.makeWrapper ]; }) ''
     mkdir -p $out/bin
     ln -s ${database}/pypi_map.sqlite $out/pypi_map.sqlite
     makeWrapper ${command}/bin/upm $out/bin/upm \

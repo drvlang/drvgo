@@ -58,7 +58,7 @@ func writeResolvedToolchain(dir, tc string) error {
 			names = append(names, name)
 		}
 	}
-	resolved := resolvedToolchains(paths, fallbacks)
+	resolved := resolvedToolchains(dir, paths, fallbacks)
 	expression := resolved[0]
 	if len(names) != 0 {
 		expression = "{ outPath = (" + expression + ");"
@@ -70,7 +70,7 @@ func writeResolvedToolchain(dir, tc string) error {
 	return os.WriteFile(filepath.Join(dir, "resolved-toolchain.nix"), []byte(expression), 0644)
 }
 
-func resolvedToolchains(toolchains, fallbacks []string) []string {
+func resolvedToolchains(dir string, toolchains, fallbacks []string) []string {
 	// Recursive Nix may not permit querying derivation bindings. Its caller
 	// already supplies an explicit toolchain. Never silently use another one.
 	expressions := make([]string, len(toolchains))
@@ -113,8 +113,24 @@ func resolvedToolchains(toolchains, fallbacks []string) []string {
 	if err != nil || len(outputs) != len(paths) {
 		return expressions
 	}
+	// Floating outputs have placeholders in the recipe. Recover the original
+	// pinned recipes when their realised outputs match the chosen bundles.
+	var pinned map[string]string
 	for i, path := range paths {
 		if outputs[i] != path {
+			if pinned == nil {
+				pinned = pinnedRecipes(dir, fallbacks)
+			}
+			drv := drvs[i]
+			if selected := pinned[path]; selected != "" {
+				drv = selected
+			}
+			expressions[i] = "let path = " + nixString(path) + "; drv = " + nixString(drv) + "; in\n" +
+				"if builtins.pathExists path && builtins.pathExists drv then\n" +
+				"  builtins.outputOf (builtins.storePath drv) \"out\"\n" +
+				"else let fallback = " + fallbacks[i] + "; in\n" +
+				"  if fallback.drvPath == drv then fallback else throw " +
+				nixString("Selected drvgo toolchain "+path+" is unavailable; pass the same toolchain explicitly. Refusing to substitute the default compiler.") + "\n"
 			continue
 		}
 		expressions[i] = "let path = " + nixString(path) + "; drv = " + nixString(drvs[i]) + "; in\n" +
@@ -125,4 +141,39 @@ func resolvedToolchains(toolchains, fallbacks []string) []string {
 			"  throw " + nixString("Selected drvgo toolchain "+path+" is unavailable; rebuild it or pass the same toolchain explicitly. Refusing to substitute the default compiler.") + "\n"
 	}
 	return expressions
+}
+
+// Compare recipes without building an unselected custom compiler or using IFD.
+func pinnedRecipes(dir string, fallbacks []string) map[string]string {
+	selected := make(map[string]string)
+	var args []string
+	for _, expr := range fallbacks {
+		args = append(args, "("+expr+").drvPath")
+	}
+	data, err := run(dir, os.Environ(), "nix-instantiate", "--eval", "--strict", "--json", "--read-write-mode", "--expr", "[ "+strings.Join(args, " ")+" ]")
+	var recipes []string
+	if err != nil || json.Unmarshal(data, &recipes) != nil || len(recipes) != len(fallbacks) {
+		return selected
+	}
+	// Toolchain, compile, link, native, and internal-link have distinct names.
+	// Batch the realisation lookup without building an unselected toolchain.
+	byName := make(map[string]string)
+	query := []string{"path-info", "--offline", "--max-jobs", "0", "--option", "builders", ""}
+	for _, drv := range recipes {
+		_, name, ok := strings.Cut(filepath.Base(drv), "-")
+		name = strings.TrimSuffix(name, ".drv")
+		if !ok || byName[name] != "" {
+			return selected
+		}
+		byName[name] = drv
+		query = append(query, drv+"^out")
+	}
+	data, err = run(dir, os.Environ(), "nix", query...)
+	if err == nil {
+		for _, path := range strings.Fields(string(data)) {
+			_, name, _ := strings.Cut(filepath.Base(path), "-")
+			selected[path] = byName[name]
+		}
+	}
+	return selected
 }

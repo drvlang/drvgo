@@ -11,11 +11,10 @@
 , previousPlan ? null
 , moduleCache ? null
 , prepareModules ? false
-, exportData ? false
-, earlyCutoff ? false
+, exportData ? true
+, earlyCutoff ? null # Compatibility with callers predating content-addressed defaults.
 , iets ? null
 }:
-assert !earlyCutoff || exportData;
 let
   pkgs = toolchain.pkgs;
   inherit (pkgs) lib;
@@ -51,7 +50,7 @@ let
     import ./planning-toolchain.nix { inherit pkgs drvgo; go = toolchain.go; };
   # Excluded test directories need go/build from the selected SDK. Share its
   # executable across planners, whose writable Go build caches start empty.
-  testSelector = pkgs.runCommand "drvgo-test-selector" {} ''
+  testSelector = pkgs.runCommand "drvgo-test-selector" { __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256"; } ''
     export HOME="$TMPDIR" GOCACHE="$TMPDIR/cache" GOTOOLCHAIN=local CGO_ENABLED=0
     cp ${../internal/export/templates/test-selection.go} selection.go
     ${toolchain.go or toolchain}/bin/go build -p "$NIX_BUILD_CORES" -trimpath -ldflags='-s -w' \
@@ -61,7 +60,7 @@ let
   # These wrappers only run explicit tools; a stdenv setup and its dependency
   # closure are unnecessary on the planning and final forwarding paths.
   planner = builtins.derivation ({
-    name = "${name}-result.drv";
+    name = "${name}-planner.drv";
     system = pkgs.stdenv.hostPlatform.system;
     builder = "${drvgo}/bin/drvgo";
     # Keep evaluator selection separate from exporter arguments so Nix can
@@ -100,7 +99,7 @@ let
     drvgoDrv = builtins.unsafeDiscardOutputDependency drvgo.drvPath;
     inherit src;
     passAsFile = [ "expression" ];
-    # The emitted derivation name must match the text-addressed .drv output.
+    # Keep the emitted recipe distinct from the text-addressed planner output.
     # A forwarding derivation supplies a stable name independent of Go import paths.
     expression = ''
       let tc = ${toolchainExpr};
@@ -108,15 +107,13 @@ let
           command = (import ./graph {
             toolchain = tc;
             exportData = ${builtins.toJSON exportData};
-            earlyCutoff = ${builtins.toJSON earlyCutoff};
           }).default;
       in derivation {
+        __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256";
         name = ${builtins.toJSON "${name}-result"};
         system = "${pkgs.stdenv.hostPlatform.system}";
-        # Creating a symlink is cheaper than querying caches or shipping its
-        # inputs to a remote builder. Go package builds remain distributable.
+        # Keep local forwarding cheap when the output is absent from caches.
         preferLocalBuild = true;
-        allowSubstitutes = false;
         # Unlike coreutils ln, the native helper leaves stdout/stderr open
         # until exit, avoiding Nix's EOF-triggered builder cleanup race.
         builder = "''${drvgo}/bin/drvgo";
@@ -138,10 +135,10 @@ let
     inherit previousPlan;
   });
   result = builtins.derivation {
+    __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256";
     inherit name;
     system = pkgs.stdenv.hostPlatform.system;
     preferLocalBuild = true;
-    allowSubstitutes = false;
     builder = "${drvgo}/bin/drvgo";
     args = [ "internal-symlink" (builtins.outputOf planner.outPath "out") (builtins.placeholder "out") ];
   };

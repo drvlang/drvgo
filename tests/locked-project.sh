@@ -42,6 +42,7 @@ paths() {
   nix eval "${opts[@]}" --raw ".#packages.$system.app.drvPath"
   nix eval "${opts[@]}" --raw ".#checks.$system.app.drvPath"
 }
+previous_check=
 for version in v1.5.0 v1.6.0; do
   cat > go.mod <<MOD
 module example.org/check
@@ -51,7 +52,13 @@ MOD
   go mod tidy
   test "$("$cli" run app)" = 00000000-0000-0000-0000-000000000000
   "$cli" test app -- -test.run TestValue
-  nix build "${opts[@]}" --no-link ".#checks.$system.app"
+  checked=$(nix build "${opts[@]}" --no-link --print-out-paths ".#checks.$system.app")
+  built=$(nix build "${opts[@]}" --no-link --print-out-paths .#app)
+  for artifact in "$built" "$(readlink "$built")" "$checked"; do
+    nix path-info --json "$artifact" | grep -q 'fixed:r:sha256:'
+  done
+  if [[ -n "$previous_check" ]]; then test "$previous_check" = "$checked"; fi
+  previous_check=$checked
 done
 known_package=$(nix eval "${opts[@]}" --raw ".#packages.$system.app.drvPath")
 known_check=$(nix eval "${opts[@]}" --raw ".#checks.$system.app.drvPath")

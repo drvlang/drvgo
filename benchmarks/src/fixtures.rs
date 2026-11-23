@@ -214,7 +214,7 @@ pub fn private_edit(a: ExportData) -> Result<()> {
     ];
     flags.extend(self::flags(false));
     let nonce = nonce()?;
-    let modes = ["full", "interfaces", "cutoff"];
+    let modes = ["full", "interfaces"];
     let mut report = json!({"scope":"Private implementation edit; initial builds excluded from edit medians","drvgo":cli,"toolchain":tc,"flags":flags,"layers":a.layers,"nonce":nonce});
     let fixture = GraphFixture {
         cli: &cli,
@@ -239,10 +239,10 @@ pub fn private_edit(a: ExportData) -> Result<()> {
                 prev = pkg;
             }
             write(&src,"main.go",&format!("package main\nimport (\"fmt\"; \"{module}/{prev}\")\nfunc main() {{ fmt.Println({prev}.Value()) }}\n"))?;
-            let options = Some(match mode {
-                "full" => "",
-                "interfaces" => "exportData = true;",
-                _ => "exportData = true; earlyCutoff = true;",
+            let options = Some(if mode == "full" {
+                "exportData = false;"
+            } else {
+                ""
             });
             let first = fixture.build(
                 &src,
@@ -259,7 +259,11 @@ pub fn private_edit(a: ExportData) -> Result<()> {
                 "privateedit",
                 "43",
             )?;
-            let count = if mode == "cutoff" { 2 } else { a.layers + 2 };
+            let count = if mode == "interfaces" {
+                2
+            } else {
+                a.layers + 2
+            };
             ensure!(
                 changed["package_builds"]
                     .as_array()

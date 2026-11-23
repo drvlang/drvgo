@@ -6,6 +6,7 @@ let
     fileset = lib.fileset.unions [ ../flake.nix ../flake.lock ../go.mod ../cmd ../internal ../nix ];
   };
 in pkgs.rustPlatform.buildRustPackage {
+  __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256";
   pname = "drvgo-bench";
   version = "0.1.0";
   src = lib.fileset.toSource {

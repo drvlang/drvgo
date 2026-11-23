@@ -65,7 +65,11 @@ func main() { fmt.Println(C.answer()) }
 			checkNativeTemporaryPaths(t, out, g.BinaryName)
 			// Moving native headers into the work directory must remain reproducible,
 			// including debug paths on platforms with different sandbox layouts.
-			if b, err := exec.Command("nix-build", append(args, "--check", "--keep-failed")...).CombinedOutput(); err != nil {
+			drv, err := exec.Command("nix-store", "--query", "--deriver", strings.TrimSpace(string(result))).Output()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if b, err := exec.Command("nix-build", strings.TrimSpace(string(drv)), "--no-out-link", "--check", "--keep-failed").CombinedOutput(); err != nil {
 				logBinaryDifferences(t, binary, filepath.Join(strings.TrimSpace(string(result))+".check", "bin", g.BinaryName))
 				t.Fatalf("compressed native reproducibility: %v\n%s", err, b)
 			}
@@ -78,11 +82,15 @@ func main() { fmt.Println(C.answer()) }
 // in two different directories, including a symlink like macOS's /var alias.
 func checkNativeTemporaryPaths(t *testing.T, graph, name string) {
 	t.Helper()
-	expression := `let d = (import ` + graph + ` {}).default; in {
+	expression := `let d = (import ` + graph + ` {}).default; tc = import ` + graph + `/toolchain.nix; in tc.pkgs.writeText "drvgo-replay-env.json" (builtins.toJSON {
 		inherit (d) builder script PATH GOROOT GOOS GOARCH CGO_ENABLED GOENV
 			GOTOOLCHAIN isBinary binaryName toolchainInput;
-	}`
-	b, err := exec.Command("nix-instantiate", "--eval", "--strict", "--json", "--expr", expression).Output()
+	})`
+	file, err := exec.Command("nix", "build", "--impure", "--no-link", "--print-out-paths", "--expr", expression).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(strings.TrimSpace(string(file)))
 	if err != nil {
 		t.Fatal(err)
 	}
