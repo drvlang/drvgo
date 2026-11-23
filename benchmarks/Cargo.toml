@@ -1,0 +1,12 @@
+[package]
+name = "drvgo-bench"
+version = "0.1.0"
+edition = "2021"
+license = "CC0-1.0"
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+drvbench-support = { git = "https://github.com/drvlang/drvkit", rev = "f3596446590f8ac8f2140e5d8634f291c665e12a" }
+serde_json = "1"
+regex = "1"
+url = "2"
