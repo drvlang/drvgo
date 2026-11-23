@@ -60,6 +60,19 @@ MOD
   if [[ -n "$previous_check" ]]; then test "$previous_check" = "$checked"; fi
   previous_check=$checked
 done
+# A generated source tree only reveals its go.sum inside the recursive planner.
+generated=$(nix build --impure --no-link --print-out-paths --option allow-import-from-derivation false \
+  --argstr source "$work" --argstr tool "$repo" --expr '
+  { source, tool }:
+  let
+    flake = builtins.getFlake tool;
+    system = builtins.currentSystem;
+    pkgs = import flake.inputs.nixpkgs { inherit system; };
+    root = /. + source;
+    input = flake.lib.projectSource { inherit root; files = map (path: root + ("/" + path)) [ "go.mod" "go.sum" "cmd" "pkg" ]; };
+    src = pkgs.runCommand "generated-go-source" {} "cp -r ${input} $out";
+  in flake.lib.mkPackage { inherit system src; package = "./cmd/program"; }')
+test "$("$generated/bin/program")" = 00000000-0000-0000-0000-000000000000
 known_package=$(nix eval "${opts[@]}" --raw ".#packages.$system.app.drvPath")
 known_check=$(nix eval "${opts[@]}" --raw ".#checks.$system.app.drvPath")
 echo outside > notes.txt
