@@ -6,6 +6,9 @@ let
   });
   fetcher = "${drvgo}/bin/drvgo";
   system = pkgs.stdenv.hostPlatform.system;
+  cacheable = { __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256"; allowSubstitutes = true; };
+  textInput = name: value: if builtins.hasContext value then (pkgs.writeText name value).overrideAttrs (_: cacheable)
+    else builtins.toFile name value;
   # Proxy paths escape uppercase ASCII; the signed member names retain their
   # original spelling. Go module paths cannot contain spaces or URL fragments.
   upper = lib.stringToCharacters "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -42,21 +45,19 @@ let
       data = builtins.readFile (source + "/go.sum");
       artifacts = map parse (builtins.filter (l: l != "") (lib.splitString "\n" data));
       metadata = map (a: a.metadata) artifacts;
+      manifestList = (pkgs.writeText "drvgo-manifests" (lib.concatMapStrings (a: "${a.manifest}\n") artifacts)).overrideAttrs (_: cacheable);
     in dynamic {
       name = "drvgo-proxy";
       prepare = ''
-        i=0
-        while IFS= read -r manifest; do
-          ${fetcher} internal-module-members "$manifest" > "members-$i.json"
-          i=$((i+1))
-        done < ${pkgs.writeText "drvgo-manifests" (lib.concatMapStrings (a: "${a.manifest}\n") artifacts)}
+        ${fetcher} internal-module-manifests ${manifestList} > members.json
       '';
       expression = ''
         let
           pkgs = import ${pkgs.path} { system = "${system}"; };
           drvgo = builtins.storePath "${drvgo}";
           cert = builtins.storePath "${pkgs.cacert}";
-          artifacts = builtins.fromJSON (builtins.readFile ${pkgs.writeText "drvgo-module-entries.json" (builtins.toJSON metadata)});
+          artifacts = builtins.fromJSON (builtins.readFile ${textInput "drvgo-module-entries.json" (builtins.toJSON metadata)});
+          manifests = builtins.fromJSON (builtins.readFile ./members.json);
           member = a: m: {
             inherit (m) name;
             file = builtins.derivation {
@@ -69,13 +70,14 @@ let
             };
           };
           plan = pkgs.lib.imap0 (i: a: a // {
-            members = map (member a) (builtins.fromJSON (builtins.readFile (./. + "/members-" + toString i + ".json")));
+            members = map (member a) (builtins.elemAt manifests i);
           }) artifacts;
         in builtins.derivation {
           __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256";
           name = "drvgo-locked-proxy"; system = "${system}";
           builder = "''${drvgo}/bin/drvgo";
-          args = [ "internal-module-proxy" (pkgs.writeText "drvgo-proxy.json" (builtins.toJSON plan)) (builtins.placeholder "out") ];
+          passAsFile = [ "manifest" ]; manifest = builtins.toJSON plan;
+          args = [ "internal-module-proxy" (builtins.placeholder "out") ];
         }
       '';
     };
@@ -87,7 +89,7 @@ in if lib.isDerivation src then dynamic {
     let pkgs = import ${pkgs.path} { system = "${system}"; };
         proxy = import ${./locked-modules.nix} {
           inherit pkgs; drvgo = builtins.storePath "${drvgo}"; dynamicFile = ${dynamicFile};
-          src = builtins.storePath "${src}"; moduleProxy = builtins.readFile ${pkgs.writeText "drvgo-proxy-url" moduleProxy};
+          src = builtins.storePath "${src}"; moduleProxy = builtins.readFile ${textInput "drvgo-proxy-url" moduleProxy};
         };
     in if proxy == null then pkgs.runCommand "drvgo-empty-proxy" { __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256"; } "mkdir $out" else proxy
   '';

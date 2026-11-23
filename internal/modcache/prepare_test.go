@@ -12,14 +12,14 @@ import (
 	"github.com/ryantm/drvgo/internal/testutil"
 )
 
-func testProxy(t *testing.T, bad bool) string {
+func testProxy(t *testing.T, goVersion string, bad bool) string {
 	t.Helper()
 	root := t.TempDir()
 	dir := filepath.Join(root, "example.com", "!upper", "dep", "@v")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	mod := "module example.com/Upper/dep\ngo 1.23\n"
+	mod := "module example.com/Upper/dep\ngo " + goVersion + "\n"
 	for name, content := range map[string]string{
 		"v1.0.0.mod":  mod,
 		"v1.0.0.info": `{"Version":"v1.0.0","Time":"2020-01-01T00:00:00Z"}`,
@@ -88,7 +88,15 @@ func TestPrepareReadOnlyCache(t *testing.T) {
 	// The builder must ignore ambient private-module and proxy settings.
 	t.Setenv("GONOPROXY", "*")
 	t.Setenv("GOPROXY", "file:///must-not-be-used")
-	if err := Prepare(goTool, testProxy(t, false), out); err != nil {
+	proxy := filepath.Join(t.TempDir(), "forwarded-proxy")
+	if err := os.Symlink(testProxy(t, "1.23", false), proxy); err != nil {
+		t.Fatal(err)
+	}
+	// This lock pins the module archive but has no independent /go.mod entry.
+	if err := os.Remove(filepath.Join(proxy, "example.com", "!upper", "dep", "@v", "v1.0.0.mod")); err != nil {
+		t.Fatal(err)
+	}
+	if err := Prepare(goTool, proxy, out); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{
@@ -142,12 +150,50 @@ func TestPrepareReadOnlyCache(t *testing.T) {
 	}
 }
 
+func TestLegacyZipMod(t *testing.T) {
+	proxy := testProxy(t, "1.23", false)
+	archive := filepath.Join(proxy, "example.com", "!upper", "dep", "@v", "v1.0.0.zip")
+	out := filepath.Join(t.TempDir(), "go.mod")
+	// This module path has no go.mod in the archive.
+	if err := writeZipMod(archive, "example.org/legacy@v1.0.0", out); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil || string(data) != "module example.org/legacy\n" {
+		t.Fatalf("generated go.mod: %q, %v", data, err)
+	}
+}
+
+func TestUnusedNewerModule(t *testing.T) {
+	goTool, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := cacheOutput(t)
+	if err := Prepare(goTool, testProxy(t, "1.98.0", false), out); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "example.com/!upper/dep@v1.0.0/dep.go")); err != nil {
+		t.Fatal(err)
+	}
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, "go.mod"), []byte("module example.org/app\ngo 1.23\nrequire example.com/Upper/dep v1.0.0\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(goTool, "list", "-mod=mod", "example.com/Upper/dep")
+	cmd.Dir = project
+	cmd.Env = append(os.Environ(), "GOMODCACHE="+out, "GOPROXY=off", "GOSUMDB=off", "GOTOOLCHAIN=local", "GOWORK=off", "GOENV=off")
+	if b, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(b), "requires go >= 1.98.0") {
+		t.Fatalf("selected module must enforce its Go version: %v: %s", err, b)
+	}
+}
+
 func TestPrepareRejectsInvalidZip(t *testing.T) {
 	goTool, err := exec.LookPath("go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := Prepare(goTool, testProxy(t, true), cacheOutput(t)); err == nil {
+	if err := Prepare(goTool, testProxy(t, "1.23", true), cacheOutput(t)); err == nil {
 		t.Fatal("accepted invalid module zip")
 	}
 }

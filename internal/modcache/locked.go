@@ -154,11 +154,41 @@ func Fetch(url, kind, checksum, out string, member []string) error {
 // Members converts one verified manifest to JSON without evaluating its paths
 // as Nix or shell source.
 func Members(manifest string, out io.Writer) error {
-	data, err := os.ReadFile(manifest)
+	members, err := readMembers(manifest)
 	if err != nil {
 		return err
 	}
-	var result []map[string]string
+	return json.NewEncoder(out).Encode(members)
+}
+
+type memberHash struct {
+	Hash string `json:"hash"`
+	Name string `json:"name"`
+}
+
+// ManifestMembers translates the entire locked graph in one planner process.
+func ManifestMembers(list string, out io.Writer) error {
+	paths, err := os.ReadFile(list)
+	if err != nil {
+		return err
+	}
+	manifests := make([][]memberHash, 0)
+	for _, path := range strings.Fields(string(paths)) {
+		members, err := readMembers(path)
+		if err != nil {
+			return err
+		}
+		manifests = append(manifests, members)
+	}
+	return json.NewEncoder(out).Encode(manifests)
+}
+
+func readMembers(manifest string) ([]memberHash, error) {
+	data, err := os.ReadFile(manifest)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]memberHash, 0)
 	for _, line := range strings.Split(strings.TrimSuffix(string(data), "\n"), "\n") {
 		if line == "" {
 			continue
@@ -166,14 +196,11 @@ func Members(manifest string, out io.Writer) error {
 		digest, name, ok := strings.Cut(line, "  ")
 		raw, err := hex.DecodeString(digest)
 		if !ok || err != nil || len(raw) != 32 || name == "" {
-			return fmt.Errorf("invalid module manifest")
+			return nil, fmt.Errorf("invalid module manifest %s", manifest)
 		}
-		result = append(result, map[string]string{"hash": digest, "name": name})
+		result = append(result, memberHash{Hash: digest, Name: name})
 	}
-	if result == nil {
-		result = []map[string]string{}
-	}
-	return json.NewEncoder(out).Encode(result)
+	return result, nil
 }
 
 func Assemble(config, out string) error {

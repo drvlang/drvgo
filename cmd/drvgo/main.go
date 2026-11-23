@@ -49,8 +49,14 @@ func run(args []string) error {
 	if len(args) == 2 && args[0] == "internal-module-members" {
 		return modcache.Members(args[1], os.Stdout)
 	}
+	if len(args) == 2 && args[0] == "internal-module-manifests" {
+		return modcache.ManifestMembers(args[1], os.Stdout)
+	}
 	if len(args) == 3 && args[0] == "internal-module-proxy" {
 		return modcache.Assemble(args[1], args[2])
+	}
+	if len(args) == 2 && args[0] == "internal-module-proxy" {
+		return modcache.Assemble(os.Getenv("manifestPath"), args[1])
 	}
 	if len(args) >= 2 && args[0] == "internal-plan" {
 		return plan(os.Getenv("plannerEvaluator"), args[1], args[2:])

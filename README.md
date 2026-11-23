@@ -2,7 +2,7 @@
 
 drvgo builds each Go package as a separate Nix derivation. When you change a package, CI rebuilds it and its dependents. Fresh runners and other commands can reuse unchanged dependencies, including the standard library, from your Nix binary cache.
 
-Package archives, compiler interfaces, linked programs, and test outputs use content addressing by default. When a private implementation edit leaves the compiler interface unchanged, downstream packages can reuse their compilations. Nix relinks the program with the updated implementation. Publish build traces with a derivation-aware copy such as `nix copy --to "$CACHE" .#api` from your project flake.
+Package archives, compiler interfaces, linked programs, and test outputs use content addressing by default. When a private implementation edit leaves the compiler interface unchanged, downstream packages can reuse their compilations. Nix relinks the program with the updated implementation. Commands and checks also share the module cache prepared from `go.sum`. Publish the generated plans and build traces so fresh workers can reuse them. [CI cache guide](https://drvlang.org/monorepos/)
 
 ## Try it
 

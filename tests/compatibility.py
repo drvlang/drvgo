@@ -244,10 +244,10 @@ if a.flake_toolchain:
         assert data['unusedData'] not in closure, (data, closure)
         report.setdefault('dynamic_runtime_references',[]).append({'explicit_inputs':explicit,'output':runtime_result})
     print(version,'runtime-source/embed/ldflags/unused-inputs/dynamic PASS',flush=True)
-    planner_cached = run(['nix-build',repo/'tests/dynamic-compatibility.nix','--argstr','system',system,
-        '--argstr','toolchainAttr',a.flake_toolchain,'--arg','allowPlannerSubstitutes','true',
+    planner_local = run(['nix-build',repo/'tests/dynamic-compatibility.nix','--argstr','system',system,
+        '--argstr','toolchainAttr',a.flake_toolchain,'--arg','allowPlannerSubstitutes','false',
         '--option','allow-import-from-derivation','false','--max-jobs','4','--cores','2','--no-out-link']).stdout.decode().strip()
-    assert planner_cached == result, 'planner cache policy changed the resolved output'
+    assert planner_local == result, 'planner cache policy changed the resolved output'
     report['planner_substitution_policy']='passed'
     nested = out/'nested-command'
     write(nested/'go.mod', 'module example.com/nested\n\ngo 1.25\n')

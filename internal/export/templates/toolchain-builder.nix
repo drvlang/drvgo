@@ -11,7 +11,7 @@
 let
   ca = { __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256"; };
   command = name: attrs: pkgs.runCommand name (attrs // ca);
-  join = attrs: (pkgs.symlinkJoin attrs).overrideAttrs (_: ca);
+  join = attrs: (pkgs.symlinkJoin attrs).overrideAttrs (_: ca // { allowSubstitutes = true; });
   target = "${pkgs.stdenv.hostPlatform.go.GOOS}_${pkgs.stdenv.hostPlatform.go.GOARCH}";
   # Copy executables instead of symlinking the SDK: workers do not need the
   # driver, documentation, other tools, or the entire standard-library source.

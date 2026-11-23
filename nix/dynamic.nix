@@ -6,11 +6,11 @@
 }:
 { src, package ? ".", vendorHash ? null, moduleProxy ? "https://proxy.golang.org", tags ? "", ldflags ? "", name ? "drvgo"
 , experimentalGo ? false, test ? false, race ? false, cgoEnabled ? null
-, allowPlannerSubstitutes ? false, allowEmptyTests ? false
+, allowPlannerSubstitutes ? true, allowEmptyTests ? false
 , runtimeInputs ? []
 , previousPlan ? null
 , moduleCache ? null
-, prepareModules ? false
+, prepareModules ? null
 , exportData ? true
 , earlyCutoff ? null # Compatibility with callers predating content-addressed defaults.
 , iets ? null
@@ -22,8 +22,11 @@ let
     else if lib.hasPrefix "file://" moduleProxy then builtins.path { path = /. + lib.removePrefix "file://" moduleProxy; name = "go-proxy"; }
     # Older callers may still pass vendorHash. go.sum determines the proxy.
     else import ./locked-modules.nix { inherit pkgs drvgo dynamicFile src moduleProxy; };
+  # Reuse verified native dependencies across commands and source edits.
+  # Hand-supplied file proxies retain their lazy extraction behavior.
+  prepare = if prepareModules == null then !(lib.hasPrefix "file://" moduleProxy) else prepareModules;
   preparedModules = if moduleCache != null then moduleCache
-    else if !prepareModules || modules == null then null
+    else if !prepare || modules == null then null
     else import ./module-cache.nix { inherit pkgs drvgo modules; go = toolchain.go; };
   # Only the recipe is needed during planning. Restore its output context in
   # the nested evaluator, so generated packages keep the same dependencies as
@@ -83,8 +86,7 @@ let
     # Remote build hooks do not reliably copy newly generated derivation closures.
     # Plan locally; the generated package derivations can still build remotely.
     preferLocalBuild = true;
-    # A planner cache hit would copy its generated derivation/source closure.
-    # Replanning is cheap; spend cache lookups on reusable package outputs.
+    # Fresh workers can substitute a published plan and its generated graph.
     allowSubstitutes = allowPlannerSubstitutes;
     __contentAddressed = true;
     outputHashMode = "text";

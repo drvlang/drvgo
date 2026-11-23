@@ -61,7 +61,7 @@
           if [[ -f ${package}/nix-support/no-tests ]]; then exit 0; fi
           shopt -s dotglob
           exec ${package}/bin/* "$@"
-        '').overrideAttrs (_: ca));
+        '').overrideAttrs (_: ca // { allowSubstitutes = true; }));
       };
       lib.mkTest = { system, src, package ? ".", target ? package, ... }@args:
         let pkgs = packageSets.${system};

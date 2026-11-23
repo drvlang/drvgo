@@ -1,9 +1,9 @@
 { system ? builtins.currentSystem, toolchainAttr ? "toolchain-go1_26"
 , src ? ./fixture, test ? false, race ? false, cgoEnabled ? null
-, allowPlannerSubstitutes ? false, allowEmptyTests ? false
+, allowPlannerSubstitutes ? true, allowEmptyTests ? false
 , package ? ".", ldflags ? ""
 , runtimeInputs ? []
-, moduleCache ? null, prepareModules ? false
+, moduleCache ? null, prepareModules ? null
 , exportData ? true, earlyCutoff ? null
 }:
 let
