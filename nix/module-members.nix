@@ -5,7 +5,7 @@ let
   pkgs = import (builtins.storePath pkgsPath) { inherit system; };
   drvgo = builtins.storePath tool;
   cert = builtins.storePath certPath;
-  artifacts = builtins.fromJSON (builtins.readFile (builtins.storePath entries));
+  artifacts = builtins.fromJSON (builtins.readFile (builtins.toPath entries));
   manifests = builtins.fromJSON (builtins.readFile (builtins.toPath members));
   member = a: m: {
     inherit (m) name;
