@@ -62,7 +62,7 @@ func Value() int {
 			if id == "" {
 				t.Fatal("missing native dependency")
 			}
-			path, err := exec.Command("nix", "build", "--no-link", "--print-out-paths", "--impure", "--expr", "(import "+out+" {}).units."+id+".out").Output()
+			path, err := exec.Command("nix", "build", "--no-link", "--print-out-paths", "--file", out, "units."+id+"^out").Output()
 			if err != nil {
 				t.Fatal(err)
 			}
