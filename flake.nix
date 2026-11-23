@@ -43,13 +43,14 @@
       });
       # Publish the same project as the default package on each supported system.
       lib.mkFlake = args: commandFlake { commands.default = args; };
-      lib.mkMonorepoFlake = { moduleTests ? false, ... }@args:
+      lib.mkMonorepoFlake = args:
         let
+          # Accept flakes written when module-wide checks required an opt-in.
           project = removeAttrs args [ "moduleTests" ];
           commands = import ./nix/monorepo.nix nixpkgs.lib project;
         in commandFlake {
           inherit commands;
-          tests = if moduleTests then import ./nix/module-tests.nix nixpkgs.lib project commands else commands;
+          tests = import ./nix/module-tests.nix nixpkgs.lib project commands;
         };
       lib.mkToolchain = { system, go ? packageSets.${system}.go }:
         import ./internal/export/templates/toolchain-builder.nix {

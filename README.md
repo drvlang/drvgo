@@ -58,29 +58,28 @@ Downloaded dependencies are verified directly against `go.sum`. Update `go.mod` 
 
 ### Multiple commands in one Go module
 
-Use `drvgo.lib.mkMonorepoFlake` with a source list such as `[ ./go.mod ./go.sum ./cmd ./pkg ]`. Add `./drvlang.json` when using a target map. It discovers commands in immediate `app/<name>/` directories containing a non-test Go source file. Non-Go projects can sit alongside Go code in both `app/` and `pkg/`. Each planner sees its own command and shared inputs such as `pkg/`, so editing a sibling command skips replanning. When `app/` is absent, discovery uses `cmd/<name>/`. For explicit targets, put `{"commands":{"api":"cmd/api"}}` in `drvlang.json` or pass the same `commands` map to the flake helper.
+Use `drvgo.lib.mkMonorepoFlake` to expose a package and app for each command. `nix flake check` automatically checks every Go package in the supplied module source, including directories containing only `_test.go` files.
+
+```nix
+drvgo.lib.mkMonorepoFlake {
+  src = drvgo.lib.projectSource {
+    root = ./.;
+    files = [ ./go.mod ./go.sum ./cmd ./pkg ];
+  };
+}
+```
 
 ```sh
 nix build .#api
 nix run .#worker -- --help
-nix flake check                 # run each command package’s tests
+nix flake check                 # check commands and libraries across the module
+nix build .#checks.x86_64-linux.module-tests/pkg/parser  # check pkg/parser alone
 ```
 
-If `app/` also contains Go libraries, set `commands = [ "api" "worker" ];` to identify the programs explicitly. Other directories remain available as shared inputs.
+Commands are discovered in immediate `app/<name>/` directories containing a non-test Go source file, falling back to `cmd/<name>/`. If these directories also contain libraries, identify the programs with `commands = [ "api" "worker" ];`. For custom locations or names, use a map such as `commands.api = "tools/server";`, or put the map under `commands` in a `drvlang.json` included in your source.
 
-For per-command source lists, set `srcForTarget = { name, target }: ...;` to return a `projectSource` containing the selected command, shared code and root manifests. With an explicit `commands` map, you can omit the project-wide `src`.
+Command checks use their command names. Other checks use `module-tests/<directory>`, or `module-tests` for the module root. Discovery skips nested modules, `vendor`, `testdata`, and hidden or underscore-prefixed directories. Go applies build constraints and module ignore rules at build time, so excluded candidates can appear as empty checks.
 
-Set `moduleTests = true;` in `mkMonorepoFlake` to include library and test-only packages in `nix flake check`. This example checks the command in `app/fern` and the tests in `garden/soil_test.go`.
-
-```nix
-drvgo.lib.mkMonorepoFlake {
-  moduleTests = true;
-  src = drvgo.lib.projectSource { root = ./.; files = [ ./go.mod ./app ./garden ]; };
-}
-```
-
-Run the garden tests alone with `nix build .#checks.x86_64-linux.module-tests/garden`. Commands keep their usual check names. Other package checks use `module-tests/<directory>`, or `module-tests` for the module root.
-
-The option requires a module-wide `src` containing `go.mod`. Discovery skips nested modules, vendor, testdata, and hidden or underscore-prefixed directories. Go applies build constraints and module ignore rules at build time, so excluded candidates can appear as empty checks. With `srcForTarget`, each additional check passes its check name and module-relative directory to the callback.
+For per-target source filters, set `srcForTarget = { name, target }: ...;` to return a `projectSource` containing the root manifests, that package, its dependencies, and its test data. The callback receives the command or check name and the module-relative package directory. With an explicit command map and no module-wide `src`, drvgo discovers packages across the supplied command sources. Include standalone test directories in `src` if they fall outside every command’s source filter.
 
 [CC0-1.0 license](LICENSE)

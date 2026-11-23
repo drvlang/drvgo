@@ -26,6 +26,11 @@ with tempfile.TemporaryDirectory(prefix='drvgo-monorepo-') as tmp:
     def run_command(name):
         return nix('run', *flags, f'.#{name}', '--', 'two words')
 
+    def expect_failed_test(test, message):
+        check = subprocess.run(['nix', 'flake', 'check', '-L', *flags], cwd=project, text=True,
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        assert check.returncode != 0 and test in check.stdout and message in check.stdout, check.stdout
+
     names = ['api', 'worker']
     system = nix('eval', '--impure', '--raw', '--expr', 'builtins.currentSystem')
     flake = '''{
@@ -54,7 +59,9 @@ func main() { fmt.Println("COMMAND", shared.Message, internal.Value, release, os
     for output in ['packages', 'apps', 'checks']:
         listed = json.loads(nix('eval', *flags, '--json', f'.#{output}', '--apply',
                                 'builtins.mapAttrs (_: builtins.attrNames)'))
-        assert listed and all(value == names for value in listed.values()), (output, listed)
+        expected = sorted(names + ['module-tests/app/internal', 'module-tests/cmd/legacy',
+                                   'module-tests/pkg/shared']) if output == 'checks' else names
+        assert listed and all(value == expected for value in listed.values()), (output, listed)
     nix('flake', 'check', *flags)
     for name in names:
         assert run_command(name) == f'{name} first internal ci two words'
@@ -75,7 +82,7 @@ func main() { fmt.Println("COMMAND", shared.Message, internal.Value, release, os
           'func main() { fmt.Println(helper.Message) }\n')
     assert run_command('api') == 'shared'
 
-    # A test-only library outside app/ must fail the opt-in flake check.
+    # A test-only library outside app/ must fail an ordinary flake check.
     project = project / 'botany'
     project.mkdir()
     write('go.mod', 'module example.org/botany\n\ngo 1.25\nignore ignored\n')
@@ -91,25 +98,19 @@ func main() { fmt.Println("COMMAND", shared.Message, internal.Value, release, os
     botany = '''{
       inputs.drvgo.url = "github:drvlang/drvgo";
       outputs = { drvgo, ... }: drvgo.lib.mkMonorepoFlake {
-        commands.fern = "app/fern";
         src = drvgo.lib.projectSource { root = ./.; files = [ ./go.mod ./botany_test.go ./app ./garden ]; };
-        moduleTests = ENABLED;
       };
     }'''
 
     def outputs(attr):
         return json.loads(nix('eval', *flags, '--json', f'.#{attr}.{system}', '--apply', 'builtins.attrNames'))
 
-    write('flake.nix', botany.replace('ENABLED', 'false'))
-    assert outputs('checks') == ['fern']
-    nix('flake', 'check', *flags)
-    write('flake.nix', botany.replace('ENABLED', 'true'))
+    write('flake.nix', botany)
     assert outputs('apps') == outputs('packages') == ['fern']
-    assert outputs('checks') == ['fern', 'module-tests', 'module-tests/garden',
-                                 'module-tests/garden/ignored', 'module-tests/garden/internal/seed']
-    failure = subprocess.run(['nix', 'flake', 'check', '-L', *flags], cwd=project, text=True,
-                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    assert failure.returncode != 0 and 'TestSoil' in failure.stdout and 'bad soil' in failure.stdout, failure.stdout
+    expected = ['fern', 'module-tests', 'module-tests/garden',
+                'module-tests/garden/ignored', 'module-tests/garden/internal/seed']
+    assert outputs('checks') == expected
+    expect_failed_test('TestSoil', 'bad soil')
     write('garden/soil_test.go', '''package garden
 import ("os"; "testing"; "example.org/botany/garden/internal/seed")
 func TestSoil(t *testing.T) {
@@ -119,14 +120,39 @@ func TestSoil(t *testing.T) {
 ''')
     nix('flake', 'check', *flags)
 
-    scoped = botany.replace('ENABLED', '''true;
-        srcForTarget = { name, target }: drvgo.lib.projectSource {
+    for old_setting in ['true', 'false']:
+        write('flake.nix', botany.replace('src =', f'moduleTests = {old_setting}; src ='))
+        assert outputs('checks') == expected
+
+    scoped = botany.replace('src =', '''srcForTarget = { name, target }: drvgo.lib.projectSource {
           root = ./.;
           files = [ ./go.mod ] ++ (if target == "." then [ ./botany_test.go ] else [ (./. + "/${target}") ]);
-        }''')
+        };
+        src =''')
     write('flake.nix', scoped)
     garden_check = f'.#checks.{system}.module-tests/garden'
     recipe = nix('eval', *flags, '--raw', garden_check + '.drvPath')
     write('app/fern/main.go', 'package main\nfunc main() { println("fern") }\n')
     assert nix('eval', *flags, '--raw', garden_check + '.drvPath') == recipe
     nix('build', *flags, '--no-link', garden_check)
+
+    # Without a module-wide src, discover across all supplied command sources.
+    write('app/ivy/main.go', 'package main\nfunc main() {}\n')
+    write('vines/vine_test.go', 'package vines\nimport "testing"\nfunc TestVine(t *testing.T) { t.Fatal("bad vine") }\n')
+    write('outside/invalid_test.go', 'excluded from every source\n')
+    write('flake.nix', '''{
+      inputs.drvgo.url = "github:drvlang/drvgo";
+      outputs = { drvgo, ... }: drvgo.lib.mkMonorepoFlake {
+        commands = { fern = "app/fern"; ivy = "app/ivy"; };
+        srcForTarget = { target, ... }: drvgo.lib.projectSource {
+          root = ./.;
+          files = [ ./go.mod ./garden (./. + "/${target}") ]
+            ++ (if target == "app/ivy" then [ ./vines ] else []);
+        };
+      };
+    }''')
+    assert outputs('checks') == ['fern', 'ivy', 'module-tests/garden', 'module-tests/garden/ignored',
+                                 'module-tests/garden/internal/seed', 'module-tests/vines']
+    expect_failed_test('TestVine', 'bad vine')
+    write('vines/vine_test.go', 'package vines\nimport "testing"\nfunc TestVine(t *testing.T) {}\n')
+    nix('flake', 'check', *flags)
