@@ -9,4 +9,4 @@ nix-build examples/upm/dynamic.nix -A package
 ./result/bin/upm --version
 ```
 
-The [build](dynamic.nix) pins the upstream source and module hash. The [packaging expression](package.nix) assembles the executable and database. Run `examples/upm/test.sh` to exercise the standalone CLI export.
+The [build](dynamic.nix) pins the upstream source and reads its go.sum. The [packaging expression](package.nix) assembles the executable and database. Run `examples/upm/test.sh` to exercise the standalone CLI export.

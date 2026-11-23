@@ -1,9 +1,10 @@
 # Source-only, package-granular Go builds. Requires dynamic-derivations,
 # ca-derivations and recursive-nix in both the client and build daemon.
 { toolchain ? import ../internal/export/templates/toolchain.nix
+, dynamicFile ? import ./drvkit.nix
 , drvgo ? import ./package.nix { pkgs = toolchain.pkgs; }
 }:
-{ src, package ? ".", vendorHash ? null, tags ? "", ldflags ? "", name ? "drvgo"
+{ src, package ? ".", vendorHash ? null, moduleProxy ? "https://proxy.golang.org", tags ? "", ldflags ? "", name ? "drvgo"
 , experimentalGo ? false, test ? false, race ? false, cgoEnabled ? null
 , allowPlannerSubstitutes ? false, allowEmptyTests ? false
 , runtimeInputs ? []
@@ -18,19 +19,18 @@ assert !earlyCutoff || exportData;
 let
   pkgs = toolchain.pkgs;
   inherit (pkgs) lib;
-  modules = ((pkgs.buildGoModule.override { go = toolchain.go; }) {
-    pname = "drvgo-modules";
-    version = "0";
-    inherit src vendorHash;
-    proxyVendor = true;
-  }).goModules;
+  modules = if moduleCache != null || moduleProxy == "off" then null
+    else if lib.hasPrefix "file://" moduleProxy then builtins.path { path = /. + lib.removePrefix "file://" moduleProxy; name = "go-proxy"; }
+    # Older callers may still pass vendorHash. go.sum determines the proxy.
+    else import ./locked-modules.nix { inherit pkgs drvgo dynamicFile src moduleProxy; };
   preparedModules = if moduleCache != null then moduleCache
     else if !prepareModules || modules == null then null
     else import ./module-cache.nix { inherit pkgs drvgo modules; go = toolchain.go; };
   # Only the recipe is needed during planning. Restore its output context in
   # the nested evaluator, so generated packages keep the same dependencies as
   # ordinary exports without making the planner fetch unused worker tools.
-  outputExpr = tc: ''builtins.appendContext ${builtins.toJSON (builtins.unsafeDiscardStringContext (toString tc))} {
+  recipe = tc: if tc ? drvPath then builtins.unsafeDiscardOutputDependency tc.drvPath else tc;
+  outputExpr = tc: if !(tc ? drvPath) then ''builtins.storePath "${tc}"'' else ''builtins.appendContext ${builtins.toJSON (builtins.unsafeDiscardStringContext (toString tc))} {
     ${builtins.toJSON (builtins.unsafeDiscardOutputDependency tc.drvPath)} = { outputs = [ "out" ]; };
   }'';
   toolchainExpr = ''{
@@ -92,11 +92,11 @@ let
     outputHashAlgo = "sha256";
     requiredSystemFeatures = [ "recursive-nix" ];
     # Make the toolchain derivation itself available to the nested evaluator.
-    toolchainDrv = builtins.unsafeDiscardOutputDependency toolchain.drvPath;
-    compileToolchainDrv = builtins.unsafeDiscardOutputDependency (toolchain.compile or toolchain).drvPath;
-    linkToolchainDrv = builtins.unsafeDiscardOutputDependency (toolchain.link or toolchain).drvPath;
-    nativeToolchainDrv = builtins.unsafeDiscardOutputDependency (toolchain.native or toolchain).drvPath;
-    internalLinkToolchainDrv = builtins.unsafeDiscardOutputDependency (toolchain.internalLink or (toolchain.native or toolchain)).drvPath;
+    toolchainDrv = recipe toolchain;
+    compileToolchainDrv = recipe (toolchain.compile or toolchain);
+    linkToolchainDrv = recipe (toolchain.link or toolchain);
+    nativeToolchainDrv = recipe (toolchain.native or toolchain);
+    internalLinkToolchainDrv = recipe (toolchain.internalLink or (toolchain.native or toolchain));
     drvgoDrv = builtins.unsafeDiscardOutputDependency drvgo.drvPath;
     inherit src;
     passAsFile = [ "expression" ];

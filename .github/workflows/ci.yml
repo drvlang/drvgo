@@ -27,8 +27,14 @@ jobs:
         with:
           ref: ${{ inputs.tag || github.ref }}
       - uses: DeterminateSystems/determinate-nix-action@f296148a827001a9a82d3685b53210c06e5d3b67 # v3
+        with:
+          extra-conf: |
+            extra-experimental-features = ca-derivations dynamic-derivations recursive-nix
+            extra-system-features = recursive-nix ca-derivations
       - run: nix flake show --all-systems
       - run: nix flake check -L
+      - name: Verify native go.sum updates and downstream tests
+        run: nix-shell --run 'bash tests/locked-project.sh'
 
   compatibility:
     strategy:

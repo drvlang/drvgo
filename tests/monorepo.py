@@ -29,7 +29,7 @@ with tempfile.TemporaryDirectory(prefix='drvgo-monorepo-') as tmp:
     names = ['api', 'worker']
     system = nix('eval', '--impure', '--raw', '--expr', 'builtins.currentSystem')
     flake = '''{
-      inputs.drvgo.url = "github:ryantm/drvgo";
+      inputs.drvgo.url = "github:drvlang/drvgo";
       outputs = { drvgo, ... }: drvgo.lib.mkMonorepoFlake {
         src = builtins.path { path = ./.; name = "source"; filter = p: _: p != toString ./docs; };
         ldflags = "-X main.release=ci";

@@ -254,7 +254,7 @@ if a.flake_toolchain:
     write(nested/'go.mod', 'module example.com/nested\n\ngo 1.25\n')
     write(nested/'cmd/hello/main.go', 'package main\nimport ("fmt"; _ "net")\nfunc main(){fmt.Println("nested works")}\n')
     write(nested/'flake.nix', f'''{{
-      inputs.drvgo.url = "github:ryantm/drvgo";
+      inputs.drvgo.url = "github:drvlang/drvgo";
       outputs = {{ self, drvgo }}: drvgo.lib.mkFlake {{
         src = self; package = "./cmd/hello"; go = "{version.removeprefix('go')}";
         ldflags = "--buildid=custom/ID";

@@ -7,7 +7,7 @@ drvgo builds each Go package as a separate Nix derivation. When you change a pac
 From a Go module with a main package, use Nix with flakes on Linux (amd64 or arm64) or Apple Silicon macOS. drvgo supplies the Go toolchain.
 
 ```sh
-nix shell github:ryantm/drvgo
+nix shell github:drvlang/drvgo
 drvgo build                     # executable in result/bin/
 drvgo run -- --help             # pass --help to your program
 ```
@@ -29,20 +29,19 @@ Add this `flake.nix` to your Go project. In a Git repository, stage it and the G
 
 ```nix
 {
-  inputs.drvgo.url = "github:ryantm/drvgo";
+  inputs.drvgo.url = "github:drvlang/drvgo";
   outputs = { drvgo, ... }: drvgo.lib.mkFlake {
-    src = builtins.path {
-      name = "go-source";
-      path = ./.;
-      filter = path: _: !(builtins.elem path (map toString [ ./docs ./flake.nix ./flake.lock ]));
+    src = drvgo.lib.projectSource {
+      root = ./.;
+      files = [ ./go.mod ./main.go ];
     };
   };
 }
 ```
 
-Exclude only paths your build never reads. Here, edits under `docs/` skip replanning. Keep embedded assets, native sources, and vendored dependencies. A self-contained module in a subdirectory can use `src = ./backend;`.
+The example builds a module with its program in `main.go`. Include the directories and files your program and tests read, including `./go.sum` for downloaded dependencies, test files, embedded assets, and native sources. A self-contained module in a subdirectory can use `src = ./backend;`.
 
-The CLI works with ordinary flakes. For `mkFlake`, enable these additional settings in the client and daemon’s `nix.conf`.
+The CLI and flake builders use dynamic derivations. Enable these settings in the client and daemon’s `nix.conf`.
 
 ```ini
 extra-experimental-features = ca-derivations dynamic-derivations recursive-nix
@@ -51,20 +50,22 @@ extra-system-features = recursive-nix ca-derivations
 
 Use `nix build` to build, or `nix run . -- --help` to pass an argument to the command. For a command in a subdirectory, add `package = "./cmd/app";`. Set `go = "1.27.4";` to select a compiler. Both interfaces default to Go 1.26.5 and also support 1.25.12, 1.26.6, and 1.27.4.
 
-To add a single package to existing flake outputs, pass the same source to `drvgo.lib.mkGoPackage { inherit system src; }`.
+To add a single package to existing flake outputs, pass the same source to `drvgo.lib.mkPackage { inherit system src; }`.
 
-For downloaded dependencies, set `vendorHash = "";`, build once, then use the hash Nix reports. Vendored and standard-library-only projects can omit it.
+Downloaded dependencies are verified directly against `go.sum`. Update `go.mod` and `go.sum` with Go, then run the same build command. Vendored modules also work.
 
 ### Multiple commands in one Go module
 
-Use `drvgo.lib.mkMonorepoFlake` in the example above with the module root as `src`. It discovers commands in immediate `app/<name>/` directories containing a non-test Go source file. Non-Go projects can sit alongside Go code in both `app/` and `pkg/`. Each planner sees its own command and shared inputs such as `pkg/`, so editing a sibling command skips replanning. The same `go` and `vendorHash` options apply to every command.
+Use `drvgo.lib.mkMonorepoFlake` with a source list such as `[ ./go.mod ./go.sum ./cmd ./pkg ]`. Add `./drvlang.json` when using a target map. It discovers commands in immediate `app/<name>/` directories containing a non-test Go source file. Non-Go projects can sit alongside Go code in both `app/` and `pkg/`. Each planner sees its own command and shared inputs such as `pkg/`, so editing a sibling command skips replanning. When `app/` is absent, discovery uses `cmd/<name>/`. For explicit targets, put `{"commands":{"api":"cmd/api"}}` in `drvlang.json` or pass the same `commands` map to the flake helper.
 
 ```sh
 nix build .#api
 nix run .#worker -- --help
-nix flake check                 # build every command on this system
+nix flake check                 # run each command package’s tests
 ```
 
 If `app/` also contains Go libraries, set `commands = [ "api" "worker" ];` to identify the programs explicitly. Other directories remain available as shared inputs.
+
+For per-command source lists, set `srcForTarget = { name, target }: ...;` to return a `projectSource` containing the selected command, shared code and root manifests. With an explicit `commands` map, you can omit the project-wide `src`.
 
 [CC0-1.0 license](LICENSE)

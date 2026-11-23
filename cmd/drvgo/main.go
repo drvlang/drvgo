@@ -43,6 +43,15 @@ Run drvgo <command> -h for options.
 `
 
 func run(args []string) error {
+	if (len(args) == 5 || len(args) == 6) && args[0] == "internal-module-fetch" {
+		return modcache.Fetch(args[1], args[2], args[3], args[4], args[5:])
+	}
+	if len(args) == 2 && args[0] == "internal-module-members" {
+		return modcache.Members(args[1], os.Stdout)
+	}
+	if len(args) == 3 && args[0] == "internal-module-proxy" {
+		return modcache.Assemble(args[1], args[2])
+	}
 	if len(args) >= 2 && args[0] == "internal-plan" {
 		return plan(os.Getenv("plannerEvaluator"), args[1], args[2:])
 	}
@@ -79,11 +88,14 @@ func run(args []string) error {
 	f.StringVar(&opts.Dir, "C", ".", "project directory")
 
 	output := "result"
+	var noLink bool
 	if command == "export" {
 		f.StringVar(&opts.Out, "o", ".drvgo", "export directory (relative to project)")
 		f.StringVar(&opts.Out, "out", ".drvgo", "alias for -o")
 	} else {
 		f.StringVar(&opts.Out, "out", ".drvgo", "export directory (relative to project)")
+		f.BoolVar(&noLink, "no-link", false, "print the built path without creating a symlink")
+		f.StringVar(&output, "out-link", "result", "Nix output symlink (relative to project)")
 		f.StringVar(&output, "o", "result", "Nix output symlink (relative to project)")
 	}
 	f.StringVar(&opts.GoVersion, "go", "", "target Go version, e.g. 1.27.4")
@@ -135,38 +147,52 @@ func run(args []string) error {
 		value := *cgo == "1"
 		opts.CGOEnabled = &value
 	}
-	opts.Package = pkg
-	graph, err := exporter.Generate(opts)
+	opts.Package, err = resolveTarget(opts.Dir, pkg)
 	if err != nil {
 		return err
 	}
-	if graph.ExperimentalGo {
-		fmt.Fprintf(os.Stderr, "drvgo: experimental Go driver %s; compatibility is unverified\n", graph.GoVersion)
-	}
-	for _, diagnostic := range graph.Diagnostics {
-		fmt.Fprintln(os.Stderr, "drvgo:", diagnostic)
-	}
-	fmt.Fprintf(os.Stderr, "Exported %d package derivations to %s\n", len(graph.Units), opts.Out)
-	if command == "export" {
-		return nil
+	// Preserve -out for callers that request a standalone export alongside the build.
+	explicitExport := false
+	f.Visit(func(option *flag.Flag) {
+		if option.Name == "out" {
+			explicitExport = true
+		}
+	})
+	if command == "export" || explicitExport {
+		graph, err := exporter.Generate(opts)
+		if err != nil {
+			return err
+		}
+		if graph.ExperimentalGo {
+			fmt.Fprintf(os.Stderr, "drvgo: experimental Go driver %s; compatibility is unverified\n", graph.GoVersion)
+		}
+		for _, message := range graph.Diagnostics {
+			fmt.Fprintln(os.Stderr, "drvgo:", message)
+		}
+		fmt.Fprintf(os.Stderr, "Exported %d package derivations to %s\n", len(graph.Units), opts.Out)
+		if command == "export" {
+			return nil
+		}
 	}
 	link := output
 	if !filepath.IsAbs(link) {
 		link = filepath.Join(opts.Dir, link)
 	}
-	c := exec.Command("nix-build", filepath.Join(opts.Out, "default.nix"), "-A", "default", "--out-link", link, "--max-jobs", "4", "--cores", "2")
-	c.Stdout = os.Stdout
-	if execute {
-		c.Stdout = os.Stderr
-	}
-	c.Stderr = os.Stderr
-	if err = c.Run(); err != nil {
+	result, err := projectBuild(opts, link, execute, noLink)
+	if err != nil {
 		return err
 	}
 	if execute {
-		if graph.EmptyTests {
+		if _, err = os.Stat(filepath.Join(result, "nix-support", "no-tests")); err == nil {
 			fmt.Fprintln(os.Stderr, "drvgo: no eligible tests")
 			return nil
+		}
+		binaries, err := os.ReadDir(filepath.Join(result, "bin"))
+		if err != nil {
+			return err
+		}
+		if len(binaries) != 1 {
+			return fmt.Errorf("expected one executable in %s/bin", result)
 		}
 		if verbose {
 			programArgs = append([]string{"-test.v"}, programArgs...)
@@ -174,10 +200,10 @@ func run(args []string) error {
 		if testRun != "" {
 			programArgs = append([]string{"-test.run", testRun}, programArgs...)
 		}
-		c = exec.Command(filepath.Join(link, "bin", graph.BinaryName), programArgs...)
+		c := exec.Command(filepath.Join(result, "bin", binaries[0].Name()), programArgs...)
 		c.Dir = opts.Dir
 		if command == "test" {
-			c.Dir = graph.PackageDir
+			c.Dir = filepath.Join(opts.Dir, opts.Package)
 		}
 		c.Stdin = os.Stdin
 		c.Stdout = os.Stdout

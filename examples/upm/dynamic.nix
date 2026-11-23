@@ -9,7 +9,6 @@ let
   build = import ../../nix/dynamic.nix {};
   common = {
     src = source;
-    vendorHash = "sha256-A4CU4C5SmEZP6Q+CVHjp+Jy4UxRXAnpvhzrsdq4NlsM=";
   };
   command = build (common // { name = "upm"; package = "./cmd/upm"; });
   generator = build (common // {
