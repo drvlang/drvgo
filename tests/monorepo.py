@@ -39,15 +39,17 @@ with tempfile.TemporaryDirectory(prefix='drvgo-monorepo-') as tmp:
     write('go.mod', 'module example.org/services\n\ngo 1.25\n')
     write('pkg/shared/shared.go', 'package shared\nimport _ "embed"\n//go:embed message.txt\nvar Message string\n')
     write('pkg/shared/message.txt', 'first')
-    write('cmd/internal/internal.go', 'package internal\nconst Value = "internal"\n')
-    write('cmd/assets/data.txt', 'other data')
+    write('app/internal/internal.go', 'package internal\nconst Value = "internal"\n')
+    write('app/web/index.ts', 'export default 1')
+    write('pkg/frontend/index.ts', 'export default 2')
+    write('cmd/legacy/main.go', 'package main\nfunc main() {}\n')
     command = '''package main
-import ("fmt"; "os"; "example.org/services/pkg/shared"; "example.org/services/cmd/internal")
+import ("fmt"; "os"; "example.org/services/pkg/shared"; "example.org/services/app/internal")
 var release string
 func main() { fmt.Println("COMMAND", shared.Message, internal.Value, release, os.Args[1]) }
 '''
     for name in names:
-        write(f'cmd/{name}/entry.go', command.replace('COMMAND', name))
+        write(f'app/{name}/entry.go', command.replace('COMMAND', name))
 
     for output in ['packages', 'apps', 'checks']:
         listed = json.loads(nix('eval', *flags, '--json', f'.#{output}', '--apply',
@@ -59,7 +61,7 @@ func main() { fmt.Println("COMMAND", shared.Message, internal.Value, release, os
     original = planners()
     write('docs/guide.md', 'irrelevant')
     assert planners() == original
-    write('cmd/api/entry.go', command.replace('COMMAND', 'edited'))
+    write('app/api/entry.go', command.replace('COMMAND', 'edited'))
     edited = planners()
     assert edited['api'] != original['api'] and edited['worker'] == original['worker']
     write('pkg/shared/message.txt', 'second')
@@ -67,8 +69,8 @@ func main() { fmt.Println("COMMAND", shared.Message, internal.Value, release, os
     assert run_command('api') == 'edited second internal ci two words'
     assert run_command('worker') == 'worker second internal ci two words'
 
-    write('cmd/helper/helper.go', 'package helper\nconst Message = "shared"\n')
+    write('app/helper/helper.go', 'package helper\nconst Message = "shared"\n')
     write('flake.nix', flake.replace('ldflags =', 'commands = [ "api" "worker" ]; ldflags ='))
-    write('cmd/api/entry.go', 'package main\nimport ("fmt"; "example.org/services/cmd/helper")\n'
+    write('app/api/entry.go', 'package main\nimport ("fmt"; "example.org/services/app/helper")\n'
           'func main() { fmt.Println(helper.Message) }\n')
     assert run_command('api') == 'shared'

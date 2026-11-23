@@ -57,7 +57,7 @@ For downloaded dependencies, set `vendorHash = "";`, build once, then use the ha
 
 ### Multiple commands in one Go module
 
-Use `drvgo.lib.mkMonorepoFlake` in the example above with the module root as `src`. It discovers programs in `cmd/<name>/`. Each planner sees its own command and shared inputs such as `pkg/`, so editing a sibling command skips replanning. The same `go` and `vendorHash` options apply to every command.
+Use `drvgo.lib.mkMonorepoFlake` in the example above with the module root as `src`. It discovers commands in immediate `app/<name>/` directories containing a non-test Go source file. Non-Go projects can sit alongside Go code in both `app/` and `pkg/`. Each planner sees its own command and shared inputs such as `pkg/`, so editing a sibling command skips replanning. The same `go` and `vendorHash` options apply to every command.
 
 ```sh
 nix build .#api
@@ -65,6 +65,6 @@ nix run .#worker -- --help
 nix flake check                 # build every command on this system
 ```
 
-If `cmd/` also contains Go libraries, set `commands = [ "api" "worker" ];` to identify the programs explicitly. Other directories remain available as shared inputs.
+If `app/` also contains Go libraries, set `commands = [ "api" "worker" ];` to identify the programs explicitly. Other directories remain available as shared inputs.
 
 [CC0-1.0 license](LICENSE)
