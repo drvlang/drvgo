@@ -27,6 +27,9 @@ def main():
           drvgo = import ./nix/package.nix { pkgs = tc.pkgs; };
           target = tc.pkgs.writeText "drvgo-forwarding-target" "forwarded data\\n";
       in builtins.genList (i: builtins.derivation {
+        __contentAddressed = true;
+        outputHashMode = "recursive";
+        outputHashAlgo = "sha256";
         name = "drvgo-forwarding-NONCE-${toString i}";
         system = tc.pkgs.stdenv.hostPlatform.system;
         builder = "${drvgo}/bin/drvgo";

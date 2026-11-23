@@ -37,13 +37,17 @@ def main():
             raise RuntimeError(f"{label}: {p.returncode}\n{p.stderr}")
         return p.stdout.strip()
 
+    def realise(expression, label):
+        return Path(run(["nix", "build", *flags, "--impure", "--no-link", "--print-out-paths",
+                         "--expr", expression], label))
+
     system = run(["nix", "eval", "--impure", "--raw", "--expr", "builtins.currentSystem"], "system")
     tc = args.toolchain.resolve()
     tc_expr = f'(builtins.getFlake {nix_string(repo)}).packages.{system}.{args.flake_toolchain}'
-    sdk = Path(run(["nix", "eval", "--impure", "--raw", "--expr", tc_expr + ".go.outPath"], "sdk"))
+    sdk = realise(tc_expr + ".go", "sdk")
     package = f'(import ./nix/dynamic.nix {{ toolchain = {tc_expr}; }})'
     profile_expr = f'({package} {{ src = ./tests/fixture; }}).planningToolchain'
-    profile = Path(run(["nix", "build", *flags, "--impure", "--no-link", "--print-out-paths", "--expr", profile_expr], "profile"))
+    profile = realise(profile_expr, "profile")
     closure = run(["nix-store", "--query", "--requisites", profile], "closure").splitlines()
     assert str(sdk) not in closure, closure
     preserved = {}
@@ -73,11 +77,11 @@ def main():
     empty.mkdir()
     (empty / "go.mod").write_text("module example.com/empty-planner\ngo 1.25\n")
     empty_expr = f'{package} {{ src = builtins.path {{ path = {nix_string(empty)}; name = "source"; }}; test = true; allowEmptyTests = true; }}'
-    selected = run(["nix", "eval", *flags, "--impure", "--raw", "--expr", f'({empty_expr}).planningToolchain.outPath'], "empty-sdk")
-    assert selected == str(tc), (selected, tc)
+    selected = realise(f'({empty_expr}).planningToolchain', "empty-sdk")
+    assert selected == tc, (selected, tc)
     pure_expr = empty_expr.replace("test = true;", "test = true; cgoEnabled = false;")
-    selected = run(["nix", "eval", *flags, "--impure", "--raw", "--expr", f'({pure_expr}).planningToolchain.outPath'], "empty-pure-sdk")
-    assert selected == str(sdk), (selected, sdk)
+    selected = realise(f'({pure_expr}).planningToolchain', "empty-pure-sdk")
+    assert selected == sdk, (selected, sdk)
     # Listing succeeds, but actual compilation must reject this type error.
     (empty / "value.go").write_text("package sample\nvar Value int = false\n")
     run(["nix", "build", *flags, "--impure", "--no-link", "--expr", empty_expr], "empty-type-error", failure="cannot use false")
@@ -86,7 +90,7 @@ def main():
     version = run([sdk / "bin/go", "env", "GOVERSION"], "sdk-version")
     next_minor = int(version.split(".")[1]) + 1
     (empty / "value.go").write_text(f"//go:build go1.{next_minor}\n\npackage sample\n")
-    marker = Path(run(["nix", "build", *flags, "--impure", "--no-link", "--print-out-paths", "--expr", empty_expr], "empty-excluded"))
+    marker = realise(empty_expr, "empty-excluded")
     assert json.loads((marker / "nix-support/no-tests").read_text()) == {"version": 1, "status": "no-tests"}
     assert not (marker / "bin").exists()
     # An invalid build constraint also takes the selector path. A cached
@@ -97,7 +101,7 @@ def main():
     # A package without tests still needs its C code compiled and validated.
     native = 'package sample\n/* static int answer(void) { return 42; } */\nimport "C"\nfunc Value() int { return int(C.answer()) }\n'
     (empty / "value.go").write_text(native)
-    native_marker = Path(run(["nix", "build", *flags, "--impure", "--no-link", "--print-out-paths", "--expr", empty_expr], "empty-native"))
+    native_marker = realise(empty_expr, "empty-native")
     assert json.loads((native_marker / "nix-support/no-tests").read_text()) == {"version": 1, "status": "no-tests"}
     (empty / "value.go").write_text(native.replace("/* static", "/*\n#error DRVGO_CGO_VALIDATION\nstatic"))
     run(["nix", "build", *flags, "--impure", "--no-link", "--expr", empty_expr], "empty-native-error", failure="DRVGO_CGO_VALIDATION")
