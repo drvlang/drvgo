@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,7 +26,7 @@ func flakeSource() string {
 		mod, err := os.ReadFile(filepath.Join(root, "go.mod"))
 		if err == nil && strings.Contains(string(mod), "module github.com/ryantm/drvgo") {
 			if _, err = os.Stat(filepath.Join(root, "flake.nix")); err == nil {
-				return "git+file://" + root
+				return (&url.URL{Scheme: "git+file", Path: root, RawQuery: "shallow=1"}).String()
 			}
 		}
 	}
