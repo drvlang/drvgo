@@ -20,7 +20,11 @@ let
   pkgs = toolchain.pkgs;
   inherit (pkgs) lib;
   modules = if moduleCache != null || moduleProxy == "off" then null
-    else if lib.hasPrefix "file://" moduleProxy then builtins.path { path = /. + lib.removePrefix "file://" moduleProxy; name = "go-proxy"; }
+    else if lib.hasPrefix "file://" moduleProxy then
+      let path = lib.removePrefix "file://" moduleProxy; in
+      if lib.isStorePath path then
+        if builtins.hasContext path then path else builtins.appendContext path { ${path}.path = true; }
+      else builtins.path { path = if lib.hasPrefix "/" path then path else /. + path; name = "go-proxy"; }
     # Older callers may still pass vendorHash. go.sum determines the proxy.
     else import ./locked-modules.nix {
       inherit pkgs drvgo dynamicFile src moduleProxy;

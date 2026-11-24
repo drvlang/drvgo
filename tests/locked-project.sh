@@ -72,6 +72,18 @@ before=$(raw_check)
 mkdir -p .drvgo
 echo 'local build artifact' > .drvgo/ignored
 test "$(raw_check)" = "$before"
+# A prepared file proxy can be passed either as a Nix input or as a file URL.
+DRVGO_TEST_REPO="$repo" DRVGO_TEST_SRC="$work" nix eval --impure --json --expr '
+  let f = builtins.getFlake (builtins.getEnv "DRVGO_TEST_REPO");
+      src = /. + builtins.getEnv "DRVGO_TEST_SRC";
+      proxy = builtins.path { path = src + "/pkg"; name = "test-module-proxy"; };
+      selected = path: (f.lib.mkPackage {
+        inherit src; system = builtins.currentSystem; package = "./cmd/program"; moduleProxy = "file://${path}";
+      }).modules;
+  in assert builtins.getContext (selected proxy) == builtins.getContext proxy;
+     assert selected (builtins.unsafeDiscardStringContext proxy) == proxy;
+     assert builtins.getContext (selected (builtins.unsafeDiscardStringContext proxy)) == builtins.getContext proxy;
+     true'
 # A generated source tree only reveals its go.sum inside the recursive planner.
 generated=$(nix build --impure --no-link --print-out-paths --option allow-import-from-derivation false \
   --argstr source "$work" --argstr tool "$repo" --expr '
