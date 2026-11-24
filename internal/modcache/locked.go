@@ -245,8 +245,15 @@ func Assemble(config, out string) error {
 			if a.Kind != "zip" && a.Kind != "mod" {
 				return fmt.Errorf("invalid module artifact type %q", a.Kind)
 			}
-			if err := os.Symlink(a.File, path+"."+a.Kind); err != nil {
-				return err
+			dest := path + "." + a.Kind
+			if err := os.Symlink(a.File, dest); err != nil {
+				// Repeated identical lines in go.sum name the same artifact.
+				if !os.IsExist(err) {
+					return err
+				}
+				if target, readErr := os.Readlink(dest); readErr != nil || target != a.File {
+					return fmt.Errorf("conflicting module entries for %s.%s", a.ProxyPath, a.Kind)
+				}
 			}
 			continue
 		}

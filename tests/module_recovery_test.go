@@ -62,11 +62,12 @@ func TestRecoverLockedArchive(t *testing.T) {
 		}
 	}
 	const rel = "example.org/probe/@v/v1.0.0"
-	writeJSON("entries", []map[string]string{{
+	artifact := map[string]string{
 		"proxyPath": rel, "version": "v1.0.0", "kind": "zip", "url": server.URL,
 		"checksum": "h1:" + base64.StdEncoding.EncodeToString(hash[:]),
-	}})
-	writeJSON("members", [][]map[string]string{members})
+	}
+	writeJSON("entries", []map[string]string{artifact, artifact})
+	writeJSON("members", [][]map[string]string{members, members})
 
 	cmd := exec.Command("nix", "build", "--impure", "--no-link", "--print-out-paths",
 		"--option", "allow-import-from-derivation", "false", "--option", "builders", "", "--max-jobs", "4",
