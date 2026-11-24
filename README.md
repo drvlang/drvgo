@@ -54,7 +54,9 @@ Use `nix build` to build, or `nix run . -- --help` to pass an argument to the co
 
 To add a single package to existing flake outputs, pass the same source to `drvgo.lib.mkPackage { inherit system src; }`.
 
-Downloaded dependencies are verified directly against `go.sum`. Update `go.mod` and `go.sum` with Go, then run the same build command. Vendored modules also work.
+Downloaded dependencies are verified directly against `go.sum`. Update `go.mod` and `go.sum` with Go, then run the same build command. Vendored modules also work. drvgo caches each verified module ZIP separately, so commands and projects can share it. A first build from `go.sum` can still generate a recovery recipe for each distinct file in the dependency archives.
+
+When comparing drvgo with an existing Nixpkgs `buildGoModule` package that uses `proxyVendor = true;`, both can use the same downloads. Pass `moduleProxy = "file://${existingPackage.goModules}";` and `prepareModules = true;` to `mkPackage`. This skips the file recovery graph and shares one extracted module cache across commands.
 
 ### Multiple commands in one Go module
 

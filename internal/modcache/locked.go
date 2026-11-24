@@ -27,6 +27,7 @@ type Artifact struct {
 	ProxyPath string   `json:"proxyPath"`
 	Version   string   `json:"version"`
 	Kind      string   `json:"kind"`
+	File      string   `json:"file"`
 	Members   []Member `json:"members"`
 }
 
@@ -203,6 +204,19 @@ func readMembers(manifest string) ([]memberHash, error) {
 	return result, nil
 }
 
+// Archive packs one verified module so different project locks can reuse it.
+func Archive(config, out string) error {
+	var members []Member
+	data, err := os.ReadFile(config)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(data, &members); err != nil {
+		return err
+	}
+	return assembleZip(out, members)
+}
+
 func Assemble(config, out string) error {
 	var artifacts []Artifact
 	data, err := os.ReadFile(config)
@@ -226,6 +240,15 @@ func Assemble(config, out string) error {
 		info, _ := json.Marshal(map[string]string{"Version": a.Version})
 		if err = os.WriteFile(path+".info", info, 0644); err != nil {
 			return err
+		}
+		if a.File != "" {
+			if a.Kind != "zip" && a.Kind != "mod" {
+				return fmt.Errorf("invalid module artifact type %q", a.Kind)
+			}
+			if err := os.Symlink(a.File, path+"."+a.Kind); err != nil {
+				return err
+			}
+			continue
 		}
 		if a.Kind == "mod" {
 			if len(a.Members) != 1 || a.Members[0].Name != "go.mod" {

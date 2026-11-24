@@ -27,7 +27,7 @@ func Prepare(goTool, proxy, out string) error {
 		return err
 	}
 	// Dynamic derivations forward the verified proxy as a store symlink.
-	// Walk its directory while still rejecting symlinks within the proxy.
+	// Walk the realized directory, including links to verified module artifacts.
 	proxy, err = filepath.EvalSymlinks(proxy)
 	if err != nil {
 		return err
@@ -54,7 +54,7 @@ func Prepare(goTool, proxy, out string) error {
 		if entry.IsDir() {
 			return os.MkdirAll(filepath.Join(download, rel), 0755)
 		}
-		if !entry.Type().IsRegular() {
+		if !entry.Type().IsRegular() && !storeArtifactLink(proxy, path, entry) {
 			return fmt.Errorf("unsupported module proxy file %s", rel)
 		}
 		if strings.HasSuffix(rel, ".lock") {
@@ -138,6 +138,21 @@ func Prepare(goTool, proxy, out string) error {
 		}
 		return nil
 	})
+}
+
+// A drvgo proxy links its .zip and .mod entries directly to regular store
+// objects. Keep arbitrary file proxies from following links outside the store.
+func storeArtifactLink(proxy, path string, entry fs.DirEntry) bool {
+	store := os.Getenv("NIX_STORE")
+	if entry.Type() != os.ModeSymlink || !filepath.IsAbs(store) || filepath.Dir(proxy) != store {
+		return false
+	}
+	target, err := os.Readlink(path)
+	if err != nil || !filepath.IsAbs(target) || filepath.Clean(target) != target || filepath.Dir(target) != store {
+		return false
+	}
+	info, err := os.Lstat(target)
+	return err == nil && info.Mode().IsRegular()
 }
 
 // A go.sum can retain unused versions requiring a newer SDK. The downloader

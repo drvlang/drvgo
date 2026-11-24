@@ -6,6 +6,7 @@ repo=$(cd "$(dirname "$0")/.." && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 cli=$(nix build "$repo#drvgo" --print-out-paths --no-link)/bin/drvgo
+(cd "$repo" && go test -count=1 -tags=integration ./tests -run "^TestRecoverLockedArchive$")
 cd "$work"
 mkdir -p cmd/program pkg/shared
 cat > drvlang.json <<'JSON'

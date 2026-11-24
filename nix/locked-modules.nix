@@ -20,6 +20,7 @@ let
         pkgs = import ${nixpkgsSource} { system = "${system}"; };
         drvgo = builtins.storePath "${drvgo}";
         lock = import ${./module-lock.nix} {
+          moduleManifest = import ${./module-manifest.nix};
           inherit pkgs drvgo; src = builtins.storePath "${src}";
           moduleProxy = builtins.readFile ${textInput "drvgo-proxy-url" moduleProxy};
         };
@@ -32,24 +33,16 @@ let
          "''${drvgo}/bin/drvgo internal-module-manifests $manifestsPath > $out/members.json")
     '';
   };
-  fromInputs = { entries, prepare ? "", members ? ''"$PWD/members.json"'' }: dynamic {
+  fromInputs = { entries, prepare ? "", members ? "./members.json" }: dynamic {
     name = "drvgo-proxy";
-    prepare = ''
-      ${prepare}
-      ${pkgs.nix}/bin/nix build --impure --no-link --print-out-paths --file ${./module-members.nix} \
-        --argstr pkgsPath ${nixpkgsSource} --argstr system ${system} --argstr tool ${drvgo} \
-        --argstr certPath ${pkgs.cacert} --argstr entries ${entries} \
-        --argstr members ${members} > members-path
-    '';
+    inherit prepare;
     expression = ''
-      let
+      import ${./module-members.nix} {
+        moduleManifest = import ${./module-manifest.nix};
+        pkgs = import ${nixpkgsSource} { system = "${system}"; };
         drvgo = builtins.storePath "${drvgo}";
-        members = builtins.storePath (builtins.replaceStrings [ "\n" ] [ "" ] (builtins.readFile ./members-path));
-      in builtins.derivation {
-        __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256";
-        name = "drvgo-locked-proxy"; system = "${system}";
-        builder = "''${drvgo}/bin/drvgo";
-        args = [ "internal-module-proxy" members (builtins.placeholder "out") ];
+        entries = ${entries};
+        members = ${members};
       }
     '';
   };
