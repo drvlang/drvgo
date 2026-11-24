@@ -27,7 +27,8 @@ with tempfile.TemporaryDirectory(prefix='drvgo-monorepo-') as tmp:
         return nix('run', *flags, f'.#{name}', '--', 'two words')
 
     def expect_failed_test(test, message):
-        check = subprocess.run(['nix', 'flake', 'check', '-L', *flags], cwd=project, text=True,
+        # Let sibling builds finish before editing the fixture and checking it again.
+        check = subprocess.run(['nix', 'flake', 'check', '-L', '--keep-going', *flags], cwd=project, text=True,
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         assert check.returncode != 0 and test in check.stdout and message in check.stdout, check.stdout
 

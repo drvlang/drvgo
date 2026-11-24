@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -64,7 +65,15 @@ func run(args []string) error {
 	// A Nix builder must keep stdout/stderr open until exit. Coreutils ln
 	// closes both early, which can race Nix's EOF-triggered process cleanup.
 	if len(args) == 3 && args[0] == "internal-symlink" {
-		return os.Symlink(args[1], args[2])
+		target, out := args[1], args[2]
+		err := os.Symlink(target, out)
+		if errors.Is(err, os.ErrExist) {
+			// A cancelled Darwin build can leave its scratch output in place.
+			if existing, readErr := os.Readlink(out); readErr == nil && existing == target {
+				return nil
+			}
+		}
+		return err
 	}
 	if len(args) == 4 && args[0] == "internal-prepare-module-cache" {
 		return modcache.Prepare(args[1], args[2], args[3])

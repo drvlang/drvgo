@@ -1,10 +1,45 @@
 package main
 
 import (
+	"errors"
 	"flag"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 )
+
+func TestForwardSymlink(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out")
+	target := filepath.Join(dir, "target")
+	forward := func(target string) error { return run([]string{"internal-symlink", target, out}) }
+
+	if err := forward(target); err != nil {
+		t.Fatal(err)
+	}
+	if err := forward(target); err != nil {
+		t.Fatalf("retrying the same link: %v", err)
+	}
+	if err := forward(target + "-other"); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("conflicting link: got %v, want file exists", err)
+	}
+	if got, err := os.Readlink(out); err != nil || got != target {
+		t.Fatalf("forwarded link = %q, %v; want %q", got, err, target)
+	}
+	if err := os.Remove(out); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(out, []byte("existing output"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := forward(target); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("existing regular file: got %v, want file exists", err)
+	}
+	if data, err := os.ReadFile(out); err != nil || string(data) != "existing output" {
+		t.Fatalf("existing output changed: %q, %v", data, err)
+	}
+}
 
 func TestPackageArguments(t *testing.T) {
 	for _, tc := range []struct {
