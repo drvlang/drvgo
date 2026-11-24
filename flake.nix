@@ -11,6 +11,8 @@
       forAllSystems = nixpkgs.lib.genAttrs systems;
       ca = { __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256"; };
       packageSets = forAllSystems (system: import nixpkgs { inherit system; });
+      readSource = import (drvkit + "/source-reader.nix") nixpkgs.lib;
+      discovery = { inherit (nixpkgs) lib; inherit readSource; };
       commandFlake = { commands, tests ? commands }: {
         packages = forAllSystems (system:
           builtins.mapAttrs (_: args: self.lib.mkGoPackage (args // { inherit system; })) commands);
@@ -38,8 +40,7 @@
         default = drvgo;
       });
       checks = forAllSystems (system: {
-        drvgo = self.packages.${system}.drvgo;
-        inherit (self.packages.${system}) bench;
+        inherit (self.packages.${system}) drvgo bench;
       });
       # Publish the same project as the default package on each supported system.
       lib.mkFlake = args: commandFlake { commands.default = args; };
@@ -47,10 +48,10 @@
         let
           # Accept flakes written when module-wide checks required an opt-in.
           project = removeAttrs args [ "moduleTests" ];
-          commands = import ./nix/monorepo.nix nixpkgs.lib project;
+          commands = import ./nix/monorepo.nix discovery project;
         in commandFlake {
           inherit commands;
-          tests = import ./nix/module-tests.nix nixpkgs.lib project commands;
+          tests = import ./nix/module-tests.nix discovery project commands;
         };
       lib.mkToolchain = { system, go ? packageSets.${system}.go }:
         import ./internal/export/templates/toolchain-builder.nix {
@@ -84,10 +85,10 @@
         '';
       lib.mkGoPackage = { system, src, package ? ".", target ? package, go ? packageSets.${system}.go, toolchain ? null, ... }@args:
         let pkgs = packageSets.${system};
-            commands = import ./nix/monorepo.nix nixpkgs.lib { inherit src; };
+            commands = import ./nix/monorepo.nix discovery { inherit src; };
             selected = if target != "." && !nixpkgs.lib.hasPrefix "./" target && commands ? ${target}
               then commands.${target}.package
-              else if target != "." && !nixpkgs.lib.hasPrefix "./" target && builtins.pathExists (toString src + "/${target}")
+              else if target != "." && !nixpkgs.lib.hasPrefix "./" target && (readSource src).exists target
                 then "./${target}" else target;
             cleaned = if pkgs.lib.isDerivation src then src else pkgs.lib.cleanSourceWith {
               name = "go-source"; inherit src;
@@ -98,7 +99,7 @@
         in (
         (import ./nix/dynamic.nix {
           toolchain = if toolchain == null then self.lib.mkToolchain { inherit system go; } else toolchain;
-          drvgo = self.packages.${system}.drvgo;
+          drvgo = self.packages.${system}.drvgo.worker;
           inherit drvkit;
         }) ((builtins.removeAttrs args [ "system" "go" "target" "toolchain" ]) // {
           src = cleaned; package = selected;

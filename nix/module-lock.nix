@@ -1,5 +1,8 @@
 # Derive the verified file-manifest inputs directly from native Go checksums.
-{ pkgs, drvgo, src, moduleProxy }:
+{ pkgs, drvgo, src, moduleProxy, source ? {
+    exists = rel: builtins.pathExists (src + "/" + rel);
+    readFile = rel: builtins.readFile (src + "/" + rel);
+  } }:
 let
   inherit (pkgs) lib;
   system = pkgs.stdenv.hostPlatform.system;
@@ -34,8 +37,8 @@ let
     || builtins.match "v[0-9][^/]*" version == null
     then throw "drvgo: invalid go.sum entry: ${line}"
     else { inherit manifest; metadata = { inherit proxyPath version kind url checksum; }; };
-  artifacts = map parse (builtins.filter (line: line != "") (lib.splitString "\n" (builtins.readFile (src + "/go.sum"))));
-in if builtins.pathExists (src + "/vendor/modules.txt") || !builtins.pathExists (src + "/go.sum") then null else {
+  artifacts = map parse (builtins.filter (line: line != "") (lib.splitString "\n" (source.readFile "go.sum")));
+in if source.exists "vendor/modules.txt" || !(source.exists "go.sum") then null else {
   entries = builtins.toJSON (map (a: a.metadata) artifacts);
   manifests = lib.concatMapStrings (a: "${a.manifest}\n") artifacts;
 }

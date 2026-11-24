@@ -3,7 +3,7 @@
 { toolchain ? import ../internal/export/templates/toolchain.nix
 , drvkit ? import ./drvkit.nix
 , dynamicFile ? drvkit + "/dynamic.nix"
-, drvgo ? import ./package.nix { pkgs = toolchain.pkgs; }
+, drvgo ? (import ./package.nix { pkgs = toolchain.pkgs; }).worker
 }:
 { src, package ? ".", vendorHash ? null, moduleProxy ? "https://proxy.golang.org", tags ? "", ldflags ? "", name ? "drvgo"
 , experimentalGo ? false, test ? false, race ? false, cgoEnabled ? null
@@ -28,6 +28,7 @@ let
     # Older callers may still pass vendorHash. go.sum determines the proxy.
     else import ./locked-modules.nix {
       inherit pkgs drvgo dynamicFile src moduleProxy;
+      readSource = import (drvkit + "/source-reader.nix") lib;
       nixpkgsSource = import (drvkit + "/nixpkgs-source.nix") pkgs (toolchain.nixpkgs or null);
     };
   # Reuse verified native dependencies across commands and source edits.

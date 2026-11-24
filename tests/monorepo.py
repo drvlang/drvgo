@@ -98,7 +98,8 @@ func main() { fmt.Println("COMMAND", shared.Message, internal.Value, release, os
     botany = '''{
       inputs.drvgo.url = "github:drvlang/drvgo";
       outputs = { drvgo, ... }: drvgo.lib.mkMonorepoFlake {
-        src = drvgo.lib.projectSource { root = ./.; files = [ ./go.mod ./botany_test.go ./app ./garden ]; };
+        src = (drvgo.lib.projectSource { root = ./.; files = [ ./go.mod ./botany_test.go ./app ./garden ]; })
+          // { outPath = throw "discovery imported the entire workspace"; };
       };
     }'''
 

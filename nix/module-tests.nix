@@ -1,17 +1,17 @@
 # Flake check names must be available during evaluation, including with IFD
 # disabled. Discover candidate directories here and let the selected Go SDK
 # decide package eligibility and build constraints when realizing each check.
-lib: { src ? null, srcForTarget ? null, ... }@args: commands:
+{ lib, readSource }: { src ? null, srcForTarget ? null, ... }@args: commands:
 let
   sourceRoot = source:
     if lib.isDerivation source then throw "drvgo: discovering Go package checks requires sources readable during evaluation"
-    else toString source;
+    else readSource source;
   roots = if src != null then [ (sourceRoot src) ] else
-    lib.unique (map (command: sourceRoot command.src) (builtins.attrValues commands));
+    map (command: sourceRoot command.src) (builtins.attrValues commands);
   visible = name: !(lib.hasPrefix "." name || lib.hasPrefix "_" name);
   discover = root: relative:
     let
-      entries = builtins.readDir (root + "/" + relative);
+      entries = root.readDir relative;
       names = builtins.filter visible (builtins.attrNames entries);
       goFile = name: entries.${name} != "directory" && lib.hasSuffix ".go" name;
       subdir = name: entries.${name} == "directory" && !(builtins.elem name [ "vendor" "testdata" ]);
@@ -20,7 +20,7 @@ let
       lib.optional (builtins.any goFile names) relative
       ++ lib.concatMap (name: discover root (child name)) (builtins.filter subdir names);
   directories = lib.concatMap (root:
-    if builtins.pathExists (root + "/go.mod") then discover root "."
+    if root.exists "go.mod" then discover root "."
     else throw "drvgo: discovering Go package checks requires go.mod at the root of each source") roots;
 
   commandDirs = lib.genAttrs (map (c: lib.removePrefix "./" c.package) (builtins.attrValues commands)) (_: true);

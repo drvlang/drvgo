@@ -12,11 +12,8 @@ import (
 	exporter "github.com/ryantm/drvgo/internal/export"
 )
 
-// Set to a filtered flake source when packaging the CLI.
-var projectFlake string
-
 func flakeSource() string {
-	if projectFlake != "" {
+	if projectFlake := os.Getenv("DRVGO_PROJECT_FLAKE"); projectFlake != "" {
 		return projectFlake
 	}
 	// Development builds can exercise their own checkout before publication.
@@ -86,7 +83,7 @@ func projectBuild(opts exporter.Options, link string, execute, noLink bool) (str
 	  let f = builtins.getFlake flake;
 	      o = builtins.fromJSON options;
 	      base = builtins.removeAttrs o [ "cacheDirectory" "toolchainPaths" ];
-	      src = builtins.path { path = /. + directory; name = "go-source";
+	      src = f.inputs.nixpkgs.lib.cleanSourceWith { src = /. + directory; name = "go-source";
 	        filter = p: t: !(builtins.elem (baseNameOf p) [ ".git" ".drvgo" ".devenv" ".direnv" ]) &&
 	          !(t == "symlink" && (p == linkName || baseNameOf p == "result")); };
 	      args = base // { inherit src; system = builtins.currentSystem; }

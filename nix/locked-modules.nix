@@ -1,4 +1,4 @@
-{ pkgs, nixpkgsSource, drvgo, dynamicFile, src, moduleProxy }:
+{ pkgs, nixpkgsSource, drvgo, dynamicFile, src, moduleProxy, readSource }:
 let
   inherit (pkgs) lib;
   dynamic = args: (import dynamicFile { inherit pkgs; }) (args // lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
@@ -9,7 +9,7 @@ let
   cacheable = { __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256"; allowSubstitutes = true; };
   textInput = name: value: if builtins.hasContext value then (pkgs.writeText name value).overrideAttrs (_: cacheable)
     else builtins.toFile name value;
-  lock = import ./module-lock.nix { inherit pkgs drvgo moduleProxy; src = toString src; };
+  lock = import ./module-lock.nix { inherit pkgs drvgo moduleProxy src; source = readSource src; };
   # Generated sources must reveal go.sum in a builder. Emit a regular metadata
   # derivation here. The public proxy planner consumes its realized output, so
   # the Darwin recursive sandbox never has to open a newly-created planner recipe.
