@@ -1,4 +1,4 @@
-{ pkgs, drvgo, dynamicFile, src, moduleProxy }:
+{ pkgs, nixpkgsSource, drvgo, dynamicFile, src, moduleProxy }:
 let
   inherit (pkgs) lib;
   dynamic = args: (import dynamicFile { inherit pkgs; }) (args // lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
@@ -17,7 +17,7 @@ let
     name = "drvgo-source-lock";
     expression = ''
       let
-        pkgs = import ${pkgs.path} { system = "${system}"; };
+        pkgs = import ${nixpkgsSource} { system = "${system}"; };
         drvgo = builtins.storePath "${drvgo}";
         lock = import ${./module-lock.nix} {
           inherit pkgs drvgo; src = builtins.storePath "${src}";
@@ -37,7 +37,7 @@ let
     prepare = ''
       ${prepare}
       ${pkgs.nix}/bin/nix build --impure --no-link --print-out-paths --file ${./module-members.nix} \
-        --argstr pkgsPath ${pkgs.path} --argstr system ${system} --argstr tool ${drvgo} \
+        --argstr pkgsPath ${nixpkgsSource} --argstr system ${system} --argstr tool ${drvgo} \
         --argstr certPath ${pkgs.cacert} --argstr entries ${entries} \
         --argstr members ${members} > members-path
     '';

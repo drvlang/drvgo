@@ -1,4 +1,4 @@
-{ pkgs, go ? pkgs.go
+{ pkgs, go ? pkgs.go, nixpkgs ? null
 , runnerSource ? builtins.toFile "drvgo-builder.go" (builtins.readFile ./runner.go)
 , buildidSource ? builtins.toFile "drvgo-buildid.go" (builtins.readFile ./buildid.go)
 , packSource ? builtins.toFile "drvgo-pack.go" (builtins.readFile ./pack.go)
@@ -159,7 +159,7 @@ let
   };
 in join {
   name = "go-libnix-toolchain";
-  passthru = { inherit pkgs go compile link native internalLink; };
+  passthru = { inherit pkgs go compile link native internalLink nixpkgs; };
   # Only discovery uses cmd/go and the complete SDK. The generated graph
   # substitutes worker tools and snapshots each selected standard package.
   paths = [ native go ];

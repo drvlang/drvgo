@@ -54,6 +54,7 @@
         };
       lib.mkToolchain = { system, go ? packageSets.${system}.go }:
         import ./internal/export/templates/toolchain-builder.nix {
+          inherit nixpkgs;
           pkgs = packageSets.${system};
           go = if builtins.isString go
             then import ./internal/export/templates/go-version.nix packageSets.${system} go
@@ -74,7 +75,7 @@
             tests = self.lib.mkGoPackage (args // { test = true; allowEmptyTests = true; });
         in pkgs.runCommand "drvgo-tests" ca ''
           if [[ ! -f ${tests}/nix-support/no-tests ]]; then
-            cp -r ${src} project
+            cp -r ${tests.src} project
             chmod -R u+w project
             cd project/${pkgs.lib.escapeShellArg tests.package}
             "${tests}"/bin/*
@@ -88,8 +89,8 @@
               then commands.${target}.package
               else if target != "." && !nixpkgs.lib.hasPrefix "./" target && builtins.pathExists (toString src + "/${target}")
                 then "./${target}" else target;
-            cleaned = if pkgs.lib.isDerivation src then src else builtins.path {
-              name = "go-source"; path = src;
+            cleaned = if pkgs.lib.isDerivation src then src else pkgs.lib.cleanSourceWith {
+              name = "go-source"; inherit src;
               filter = path: type: let n = baseNameOf path; in
                 !(builtins.elem n [ ".git" ".drvgo" ".devenv" ".direnv" ])
                 && !(type == "symlink" && (n == "result" || pkgs.lib.hasPrefix "result-" n));
@@ -98,9 +99,9 @@
         (import ./nix/dynamic.nix {
           toolchain = if toolchain == null then self.lib.mkToolchain { inherit system go; } else toolchain;
           drvgo = self.packages.${system}.drvgo;
-          dynamicFile = drvkit + "/dynamic.nix";
+          inherit drvkit;
         }) ((builtins.removeAttrs args [ "system" "go" "target" "toolchain" ]) // {
           src = cleaned; package = selected;
-        })) // { package = selected; };
+        })) // { package = selected; src = cleaned; };
     };
 }

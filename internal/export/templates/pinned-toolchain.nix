@@ -10,5 +10,6 @@ let
   pkgs = import source.outPath {};
 in import ./toolchain-builder.nix {
   inherit pkgs;
+  nixpkgs = source;
   go = if goVersion == null then pkgs.go else import ./go-version.nix pkgs goVersion;
 }

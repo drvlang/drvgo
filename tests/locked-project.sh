@@ -60,6 +60,18 @@ MOD
   if [[ -n "$previous_check" ]]; then test "$previous_check" = "$checked"; fi
   previous_check=$checked
 done
+# A raw checkout must use the compiler's filtered source for the test runner too.
+raw_check() {
+  DRVGO_TEST_REPO="$repo" DRVGO_TEST_SRC="$work" nix eval --impure --raw --expr '
+    let f = builtins.getFlake (builtins.getEnv "DRVGO_TEST_REPO"); in (f.lib.mkTest {
+      system = builtins.currentSystem; src = /. + builtins.getEnv "DRVGO_TEST_SRC";
+      package = "./cmd/program";
+    }).drvPath'
+}
+before=$(raw_check)
+mkdir -p .drvgo
+echo 'local build artifact' > .drvgo/ignored
+test "$(raw_check)" = "$before"
 # A generated source tree only reveals its go.sum inside the recursive planner.
 generated=$(nix build --impure --no-link --print-out-paths --option allow-import-from-derivation false \
   --argstr source "$work" --argstr tool "$repo" --expr '

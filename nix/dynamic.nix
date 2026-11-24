@@ -1,7 +1,8 @@
 # Source-only, package-granular Go builds. Requires dynamic-derivations,
 # ca-derivations and recursive-nix in both the client and build daemon.
 { toolchain ? import ../internal/export/templates/toolchain.nix
-, dynamicFile ? import ./drvkit.nix
+, drvkit ? import ./drvkit.nix
+, dynamicFile ? drvkit + "/dynamic.nix"
 , drvgo ? import ./package.nix { pkgs = toolchain.pkgs; }
 }:
 { src, package ? ".", vendorHash ? null, moduleProxy ? "https://proxy.golang.org", tags ? "", ldflags ? "", name ? "drvgo"
@@ -21,7 +22,10 @@ let
   modules = if moduleCache != null || moduleProxy == "off" then null
     else if lib.hasPrefix "file://" moduleProxy then builtins.path { path = /. + lib.removePrefix "file://" moduleProxy; name = "go-proxy"; }
     # Older callers may still pass vendorHash. go.sum determines the proxy.
-    else import ./locked-modules.nix { inherit pkgs drvgo dynamicFile src moduleProxy; };
+    else import ./locked-modules.nix {
+      inherit pkgs drvgo dynamicFile src moduleProxy;
+      nixpkgsSource = import (drvkit + "/nixpkgs-source.nix") pkgs (toolchain.nixpkgs or null);
+    };
   # Reuse verified native dependencies across commands and source edits.
   # Hand-supplied file proxies retain their lazy extraction behavior.
   prepare = if prepareModules == null then !(lib.hasPrefix "file://" moduleProxy) else prepareModules;
