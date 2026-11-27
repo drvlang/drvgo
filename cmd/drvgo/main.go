@@ -62,6 +62,9 @@ func run(args []string) error {
 	if len(args) == 2 && args[0] == "internal-module-proxy" {
 		return modcache.Assemble(os.Getenv("manifestPath"), args[1])
 	}
+	if len(args) == 1 && args[0] == "internal-proxy-plan" {
+		return modcache.PlanProxy()
+	}
 	if len(args) >= 2 && args[0] == "internal-plan" {
 		return plan(os.Getenv("plannerEvaluator"), args[1], args[2:])
 	}

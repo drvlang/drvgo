@@ -9,13 +9,11 @@
 , ccQuerySource ? builtins.toFile "drvgo-cc-query.c.in" (builtins.readFile ./cc-query.c.in)
 }:
 let
-  ca = { __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256"; };
-  command = name: attrs: pkgs.runCommand name (attrs // ca);
-  join = attrs: (pkgs.symlinkJoin attrs).overrideAttrs (_: ca // { allowSubstitutes = true; });
+  join = attrs: (pkgs.symlinkJoin attrs).overrideAttrs (_: { allowSubstitutes = true; });
   target = "${pkgs.stdenv.hostPlatform.go.GOOS}_${pkgs.stdenv.hostPlatform.go.GOARCH}";
   # Copy executables instead of symlinking the SDK: workers do not need the
   # driver, documentation, other tools, or the entire standard-library source.
-  tools = names: command "go-libnix-${builtins.concatStringsSep "-" names}" {
+  tools = names: pkgs.runCommand "go-libnix-${builtins.concatStringsSep "-" names}" {
     disallowedReferences = [ go ];
   } ''
     mkdir -p $out/share/go/pkg/tool/${target}
@@ -33,7 +31,7 @@ let
       "${builtins.unsafeDiscardStringContext (toString go)}/share/go/src/cmd/drvgo-builder/pack-upstream.go" = "@DRVGO_PACK_SOURCE@";
     };
   });
-  helpers = command "go-libnix-helpers" {
+  helpers = pkgs.runCommand "go-libnix-helpers" {
     nativeBuildInputs = [ go ];
     disallowedReferences = [ go ];
   } ''
@@ -45,7 +43,7 @@ let
     patch --silent --fuzz=0 "$TMPDIR/pack-upstream.go" < ${packPatch}
     substitute ${overlay} "$TMPDIR/overlay.json" \
       --subst-var-by DRVGO_PACK_SOURCE "$TMPDIR/pack-upstream.go"
-    go build -trimpath -ldflags='-s -w' -tags drvgo_toolchain \
+    go build -p "$NIX_BUILD_CORES" -trimpath -gcflags='all=-dwarf=false -l' -ldflags='-s -w' -tags drvgo_toolchain \
       -overlay "$TMPDIR/overlay.json" -o $out/bin/drvgo-builder cmd/drvgo-builder
   '';
   compile = join {
@@ -69,7 +67,7 @@ let
   # runtime archives but do not need its compiler, assembler, or external linker.
   queryArchArgs = if pkgs.stdenv.hostPlatform.isDarwin then [ "-arch" "arm64" ]
     else if pkgs.stdenv.hostPlatform.isx86_64 then [ "-m64" ] else [];
-  internalLinkSupport = command "go-libnix-internal-link-support" {
+  internalLinkSupport = pkgs.runCommand "go-libnix-internal-link-support" {
     disallowedReferences = [ cc cc.cc ];
   } ''
     mkdir -p $out/bin $out/lib $out/nix-support
@@ -99,60 +97,11 @@ let
     name = "go-libnix-internal-link-toolchain";
     paths = [ link internalLinkSupport ];
   };
-  # lto-dump inspects compiler IR; compiling and linking use lto1 instead.
-  # Keep the frontends, LTO backend, libraries, headers and diagnostics intact.
-  # The runtime-query bundle above keeps its original compiler recipe.
-  workerCC = if pkgs.stdenv.hostPlatform.isLinux && (cc.isGNU or false)
-    && (cc.cc.outputName or "out") == "out" then
-    let
-      gcc = cc.cc;
-      copied = command gcc.name {
-        disallowedReferences = [ gcc ];
-      } ''
-        export LC_ALL=C
-        gccOriginal=${gcc}
-        cp -a "$gccOriginal" "$out"
-        chmod -R u+w "$out"
-        rm -f "$out/bin/lto-dump" "$out/bin/"*-lto-dump
-        # Preserve the store basename and replace only its fixed-size hash.
-        # This relocates embedded compiler search paths without resizing ELF
-        # sections or retaining the original compiler in the worker closure.
-        test "''${#gccOriginal}" -eq "''${#out}"
-        gccOldHash="$(basename "$gccOriginal")"
-        gccOldHash="''${gccOldHash%%-*}"
-        gccNewHash="$(basename "$out")"
-        gccNewHash="''${gccNewHash%%-*}"
-        if grep -rlFZ -- "$gccOriginal" "$out" > "$TMPDIR/rewrite-files"; then
-          xargs -0 -r sed -i "s|${builtins.storeDir}/$gccOldHash-|${builtins.storeDir}/$gccNewHash-|g" < "$TMPDIR/rewrite-files"
-        else
-          grepStatus=$?
-          test "$grepStatus" -eq 1
-        fi
-        find "$out" -type l -print0 > "$TMPDIR/rewrite-links"
-        while IFS= read -r -d $'\0' gccLink; do
-          gccTarget="$(readlink "$gccLink")"
-          case "$gccTarget" in
-            "$gccOriginal"/*) ln -sfn "$out''${gccTarget#"$gccOriginal"}" "$gccLink" ;;
-          esac
-        done < "$TMPDIR/rewrite-links"
-      '';
-      compact = gcc // copied // { inherit (gcc) stdenv; };
-    in cc.override (old: {
-      cc = compact;
-      # Rewrapping the bootstrap compiler otherwise selects its bootstrap
-      # build environment. Use the current builder and omit separate manuals.
-      stdenvNoCC = pkgs.stdenvNoCC;
-      propagateDoc = false;
-    } // pkgs.lib.optionalAttrs (old ? gccForLibs && old.gccForLibs != null
-      && toString old.gccForLibs == toString gcc) {
-      gccForLibs = compact;
-    })
-  else cc;
   native = join {
     name = "go-libnix-native-toolchain";
     # Replay handles file operations itself. The compiler wrappers retain their
     # own runtime utilities; pkg-config dependencies are unsupported.
-    paths = [ link (tools [ "cgo" ]) workerCC ];
+    paths = [ link (tools [ "cgo" ]) cc ];
     postBuild = pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
       ln -s ${pkgs.lib.getBin pkgs.stdenv.cc.bintools.bintools}/bin/dsymutil $out/bin/dsymutil
     '';

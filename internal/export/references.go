@@ -9,11 +9,13 @@ import (
 	"os/exec"
 	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/ryantm/drvgo/internal/nixstore"
 	"github.com/ryantm/drvgo/internal/plan"
 )
 
+var storePrefix = []byte("/nix/store/")
 var storeReference = regexp.MustCompile(`/nix/store/[0123456789abcdfghijklmnpqrsvwxyz]{32}-[A-Za-z0-9+._?=-]+`)
 
 // Nix limits the name after the hash to 211 bytes. Keep a complete possible
@@ -39,8 +41,10 @@ func collectStoreReferences(units []plan.Unit, snapshots map[string]preparedSour
 				candidates[path] = true
 			}
 		}
-		for _, path := range storeReference.FindAllString(u.Script, -1) {
-			add(path)
+		if strings.Contains(u.Script, "/nix/store/") {
+			for _, path := range storeReference.FindAllString(u.Script, -1) {
+				add(path)
+			}
 		}
 		for _, id := range u.Sources {
 			for _, path := range snapshots[id].references {
@@ -126,14 +130,16 @@ func scanStoreReferences(r io.Reader, buffer []byte, add func(string)) error {
 	for {
 		n, err := r.Read(buffer[carry:])
 		data := buffer[:carry+n]
-		for _, match := range storeReference.FindAllIndex(data, -1) {
-			if match[1] == len(data) && err == nil {
-				continue // The next chunk may extend this name.
-			}
-			if match[1]-match[0] <= maxStoreReference {
-				path := string(data[match[0]:match[1]])
-				if validStoreReference(path) {
-					add(path)
+		if bytes.Contains(data, storePrefix) {
+			for _, match := range storeReference.FindAllIndex(data, -1) {
+				if match[1] == len(data) && err == nil {
+					continue // The next chunk may extend this name.
+				}
+				if match[1]-match[0] <= maxStoreReference {
+					path := string(data[match[0]:match[1]])
+					if validStoreReference(path) {
+						add(path)
+					}
 				}
 			}
 		}

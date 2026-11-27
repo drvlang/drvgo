@@ -146,169 +146,7 @@ func nixSystem(goos, goarch string) (string, error) {
 var safePath = regexp.MustCompile(`^[a-zA-Z0-9/._@+!,=:~-]+$`)
 
 func Generate(o Options) (*Graph, error) {
-	if o.AllowEmptyTests && !o.Test {
-		return nil, fmt.Errorf("allow-empty-tests requires test mode")
-	}
-	if o.Race && o.CGOEnabled != nil && !*o.CGOEnabled {
-		return nil, fmt.Errorf("-race requires cgo; remove -cgo 0 or use -cgo 1")
-	}
-	dir, err := filepath.Abs(o.Dir)
-	if err != nil {
-		return nil, err
-	}
-	dir, err = filepath.EvalSymlinks(dir)
-	if err != nil {
-		return nil, err
-	}
-	if !safePath.MatchString(dir) {
-		return nil, fmt.Errorf("project path contains unsupported shell characters: %q", dir)
-	}
-	if o.Package == "" {
-		o.Package = "."
-	}
-	if o.GoVersion != "" && o.Toolchain != "" {
-		return nil, fmt.Errorf("choose either -go or -toolchain")
-	}
-	tc := o.Toolchain
-	if tc == "" {
-		tc, err = toolchainForVersion(o.GoVersion)
-		if err != nil {
-			return nil, err
-		}
-	}
-	env := controlledEnv(tc)
-	if o.CGOEnabled != nil {
-		value := "0"
-		if *o.CGOEnabled {
-			value = "1"
-		}
-		env = append(env, "CGO_ENABLED="+value)
-	}
-	if o.ModuleProxy != "" {
-		env = append(env, "GOPROXY="+o.ModuleProxy, "GOSUMDB=off", "GOPATH="+filepath.Join(os.TempDir(), "drvgo-go"))
-	}
-	if o.ModuleCache != "" {
-		cache, err := filepath.Abs(o.ModuleCache)
-		if err != nil {
-			return nil, err
-		}
-		cache, err = filepath.EvalSymlinks(cache)
-		if err != nil {
-			return nil, fmt.Errorf("module cache: %w", err)
-		}
-		env = append(env, "GOMODCACHE="+cache, "GOPROXY=off", "GOSUMDB=off", "GOPATH="+filepath.Join(os.TempDir(), "drvgo-go"))
-	}
-	goBin := tc + "/bin/go"
-	eb, err := run(dir, env, goBin, "env", "-json", "GOROOT", "GOOS", "GOARCH", "GOVERSION")
-	if err != nil {
-		return nil, err
-	}
-	ge := map[string]string{}
-	if err = json.Unmarshal(eb, &ge); err != nil {
-		return nil, err
-	}
-	system, err := nixSystem(ge["GOOS"], ge["GOARCH"])
-	if err != nil {
-		return nil, err
-	}
-	driver, err := plan.SelectDriver(ge["GOVERSION"], o.ExperimentalGo)
-	if err != nil {
-		return nil, err
-	}
-	diagnostics, err := checkRequirements(dir, ge["GOVERSION"])
-	if err != nil {
-		return nil, err
-	}
-	flags := []string{"-trimpath", "-buildvcs=false"}
-	if o.Race {
-		flags = append(flags, "-race")
-	}
-	if o.Tags != "" {
-		flags = append(flags, "-tags", o.Tags)
-	}
-	if o.LDFlags != "" {
-		flags = append(flags, "-ldflags", o.LDFlags)
-	}
-	graph := &Graph{Driver: driver.Family, ExperimentalGo: driver.Experimental, Diagnostics: diagnostics, System: system, GoRoot: ge["GOROOT"], GoOS: ge["GOOS"], GoArch: ge["GOARCH"], CGO: "1", GoVersion: ge["GOVERSION"]}
-	if o.CGOEnabled != nil && !*o.CGOEnabled {
-		graph.CGO = "0"
-	}
-	if o.AllowEmptyTests {
-		empty, err := emptyTestSelection(dir, append(env, "GOROOT="+graph.GoRoot), goBin, flags, o)
-		if err != nil {
-			return nil, err
-		}
-		if empty {
-			return exportEmptyTests(o.Out, tc, o.GoVersion, graph)
-		}
-	}
-	// In particular, do not request Stale: calculating it hashes the build
-	// graph, work that the subsequent dry run already performs.
-	args := append(driver.ListArgs(), flags...)
-	if o.Test {
-		args = append(args, "-test")
-	}
-	args = append(args, o.Package)
-	buildArgs := append([]string{"build", "-n", "-a", "-work", "-p", "1"}, flags...)
-	if o.Test {
-		buildArgs = append([]string{"test", "-c", "-vet=off", "-n", "-a", "-work", "-p", "1"}, flags...)
-	}
-	buildArgs = append(buildArgs, "-o", "/LIBNIX_OUTPUT", o.Package)
-	data, trace, err := discover(dir, env, goBin, args, buildArgs)
-	if err != nil {
-		return nil, err
-	}
-	var packages []Package
-	// Native objects and an explicit external link mode need the C toolchain.
-	// Ordinary Go links can use a much smaller bundle, even with cgo enabled
-	// globally when no selected dependency actually uses it.
-	nativeLink := o.Race || strings.Contains(o.LDFlags, "-linkmode") || strings.Contains(o.LDFlags, "-extld")
-	nativeObjects := o.Race
-	dec := json.NewDecoder(bytes.NewReader(data))
-	var target *Package
-	for {
-		var p Package
-		err = dec.Decode(&p)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-		if len(p.CgoPkgConfig) > 0 {
-			return nil, fmt.Errorf("%s needs pkg-config libraries (%s); native dependency injection is not implemented", p.ImportPath, strings.Join(p.CgoPkgConfig, " "))
-		}
-		if len(p.SwigFiles)+len(p.SwigCXXFiles)+len(p.FFiles) > 0 {
-			return nil, fmt.Errorf("%s requires unsupported SWIG or Fortran tools", p.ImportPath)
-		}
-		packages = append(packages, p)
-		nativeLink = nativeLink || len(p.CgoFiles)+len(p.SysoFiles) > 0
-		nativeObjects = nativeObjects || len(p.CgoFiles)+len(p.SysoFiles) > 0
-		if !p.DepOnly && (!o.Test || isTestMain(p)) {
-			if target != nil {
-				if o.Test {
-					return nil, fmt.Errorf("select one package with tests, not multiple packages")
-				}
-				return nil, fmt.Errorf("select one command package, not multiple packages")
-			}
-			pp := p
-			target = &pp
-		}
-	}
-	if target == nil || target.Name != "main" {
-		if o.Test {
-			return nil, fmt.Errorf("select one package with tests; no generated test main was found")
-		}
-		return nil, fmt.Errorf("select one main package")
-	}
-	if o.Test {
-		packages, trace, err = prepareTestSources(packages, *target, trace)
-		if err != nil {
-			return nil, err
-		}
-	}
-	units, err := driver.Parse(string(trace), dir)
-	if err != nil {
+	if err := validateOptions(o); err != nil {
 		return nil, err
 	}
 	out, err := filepath.Abs(o.Out)
@@ -333,9 +171,233 @@ func Generate(o Options) (*Graph, error) {
 		return nil, err
 	}
 	defer os.RemoveAll(staging)
-	sources, sourceHashes, err := collectSources(packages, staging)
+	graph, tc, err := discoverGraphWithToolchain(o, staging)
 	if err != nil {
 		return nil, err
+	}
+	if graph.EmptyTests {
+		return exportEmptyTests(o.Out, tc, o.GoVersion, graph)
+	}
+	if err = writeToolchainFiles(staging, o.GoVersion); err != nil {
+		return nil, err
+	}
+	b, err := templates.ReadFile("templates/default.nix")
+	if err != nil {
+		return nil, err
+	}
+	if err = os.WriteFile(filepath.Join(staging, "default.nix"), b, 0644); err != nil {
+		return nil, err
+	}
+	if err = os.WriteFile(filepath.Join(staging, "scripts.nix"), []byte(nixScripts(graph.Units)), 0644); err != nil {
+		return nil, err
+	}
+	b, err = json.Marshal(graph)
+	if err != nil {
+		return nil, err
+	}
+	if err = os.WriteFile(filepath.Join(staging, "graph.json"), b, 0644); err != nil {
+		return nil, err
+	}
+	if err = writeEvaluationMetadata(staging, graph); err != nil {
+		return nil, err
+	}
+	if err = writeResolvedToolchain(staging, tc); err != nil {
+		return nil, err
+	}
+	if err = os.WriteFile(filepath.Join(staging, ".drvgo"), []byte("1\n"), 0644); err != nil {
+		return nil, err
+	}
+	if err = os.RemoveAll(out); err != nil {
+		return nil, err
+	}
+	if err = os.Rename(staging, out); err != nil {
+		return nil, err
+	}
+	return graph, nil
+}
+
+func discoverGraph(o Options, staging string) (*Graph, error) {
+	graph, _, err := discoverGraphWithToolchain(o, staging)
+	return graph, err
+}
+
+func validateOptions(o Options) error {
+	if o.AllowEmptyTests && !o.Test {
+		return fmt.Errorf("allow-empty-tests requires test mode")
+	}
+	if o.Race && o.CGOEnabled != nil && !*o.CGOEnabled {
+		return fmt.Errorf("-race requires cgo; remove -cgo 0 or use -cgo 1")
+	}
+	if o.GoVersion != "" && o.Toolchain != "" {
+		return fmt.Errorf("choose either -go or -toolchain")
+	}
+	return nil
+}
+
+func discoverGraphWithToolchain(o Options, staging string) (*Graph, string, error) {
+	if err := validateOptions(o); err != nil {
+		return nil, "", err
+	}
+	dir, err := filepath.Abs(o.Dir)
+	if err != nil {
+		return nil, "", err
+	}
+	dir, err = filepath.EvalSymlinks(dir)
+	if err != nil {
+		return nil, "", err
+	}
+	if !safePath.MatchString(dir) {
+		return nil, "", fmt.Errorf("project path contains unsupported shell characters: %q", dir)
+	}
+	if o.Package == "" {
+		o.Package = "."
+	}
+	tc := o.Toolchain
+	if tc == "" {
+		tc, err = toolchainForVersion(o.GoVersion)
+		if err != nil {
+			return nil, "", err
+		}
+	}
+	env := controlledEnv(tc)
+	if o.CGOEnabled != nil {
+		value := "0"
+		if *o.CGOEnabled {
+			value = "1"
+		}
+		env = append(env, "CGO_ENABLED="+value)
+	}
+	if o.ModuleProxy != "" {
+		env = append(env, "GOPROXY="+o.ModuleProxy, "GOSUMDB=off", "GOPATH="+filepath.Join(os.TempDir(), "drvgo-go"))
+	}
+	if o.ModuleCache != "" {
+		cache, err := filepath.Abs(o.ModuleCache)
+		if err != nil {
+			return nil, "", err
+		}
+		cache, err = filepath.EvalSymlinks(cache)
+		if err != nil {
+			return nil, "", fmt.Errorf("module cache: %w", err)
+		}
+		env = append(env, "GOMODCACHE="+cache, "GOPROXY=off", "GOSUMDB=off", "GOPATH="+filepath.Join(os.TempDir(), "drvgo-go"))
+	}
+	goBin := tc + "/bin/go"
+	eb, err := run(dir, env, goBin, "env", "-json", "GOROOT", "GOOS", "GOARCH", "GOVERSION")
+	if err != nil {
+		return nil, "", err
+	}
+	ge := map[string]string{}
+	if err = json.Unmarshal(eb, &ge); err != nil {
+		return nil, "", err
+	}
+	system, err := nixSystem(ge["GOOS"], ge["GOARCH"])
+	if err != nil {
+		return nil, "", err
+	}
+	driver, err := plan.SelectDriver(ge["GOVERSION"], o.ExperimentalGo)
+	if err != nil {
+		return nil, "", err
+	}
+	diagnostics, err := checkRequirements(dir, ge["GOVERSION"])
+	if err != nil {
+		return nil, "", err
+	}
+	flags := []string{"-trimpath", "-buildvcs=false"}
+	if o.Race {
+		flags = append(flags, "-race")
+	}
+	if o.Tags != "" {
+		flags = append(flags, "-tags", o.Tags)
+	}
+	if o.LDFlags != "" {
+		flags = append(flags, "-ldflags", o.LDFlags)
+	}
+	graph := &Graph{Driver: driver.Family, ExperimentalGo: driver.Experimental, Diagnostics: diagnostics, System: system, GoRoot: ge["GOROOT"], GoOS: ge["GOOS"], GoArch: ge["GOARCH"], CGO: "1", GoVersion: ge["GOVERSION"]}
+	if o.CGOEnabled != nil && !*o.CGOEnabled {
+		graph.CGO = "0"
+	}
+	if o.AllowEmptyTests {
+		empty, err := emptyTestSelection(dir, append(env, "GOROOT="+graph.GoRoot), goBin, flags, o)
+		if err != nil {
+			return nil, "", err
+		}
+		if empty {
+			graph.EmptyTests = true
+			return graph, tc, nil
+		}
+	}
+	// In particular, do not request Stale: calculating it hashes the build
+	// graph, work that the subsequent dry run already performs.
+	args := append(driver.ListArgs(), flags...)
+	if o.Test {
+		args = append(args, "-test")
+	}
+	args = append(args, o.Package)
+	buildArgs := append([]string{"build", "-n", "-a", "-work", "-p", "1"}, flags...)
+	if o.Test {
+		buildArgs = append([]string{"test", "-c", "-vet=off", "-n", "-a", "-work", "-p", "1"}, flags...)
+	}
+	buildArgs = append(buildArgs, "-o", "/LIBNIX_OUTPUT", o.Package)
+	data, trace, err := discover(dir, env, goBin, args, buildArgs)
+	if err != nil {
+		return nil, "", err
+	}
+	var packages []Package
+	// Native objects and an explicit external link mode need the C toolchain.
+	// Ordinary Go links can use a much smaller bundle, even with cgo enabled
+	// globally when no selected dependency actually uses it.
+	nativeLink := o.Race || strings.Contains(o.LDFlags, "-linkmode") || strings.Contains(o.LDFlags, "-extld")
+	nativeObjects := o.Race
+	dec := json.NewDecoder(bytes.NewReader(data))
+	var target *Package
+	for {
+		var p Package
+		err = dec.Decode(&p)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, "", err
+		}
+		if len(p.CgoPkgConfig) > 0 {
+			return nil, "", fmt.Errorf("%s needs pkg-config libraries (%s); native dependency injection is not implemented", p.ImportPath, strings.Join(p.CgoPkgConfig, " "))
+		}
+		if len(p.SwigFiles)+len(p.SwigCXXFiles)+len(p.FFiles) > 0 {
+			return nil, "", fmt.Errorf("%s requires unsupported SWIG or Fortran tools", p.ImportPath)
+		}
+		packages = append(packages, p)
+		nativeLink = nativeLink || len(p.CgoFiles)+len(p.SysoFiles) > 0
+		nativeObjects = nativeObjects || len(p.CgoFiles)+len(p.SysoFiles) > 0
+		if !p.DepOnly && (!o.Test || isTestMain(p)) {
+			if target != nil {
+				if o.Test {
+					return nil, "", fmt.Errorf("select one package with tests, not multiple packages")
+				}
+				return nil, "", fmt.Errorf("select one command package, not multiple packages")
+			}
+			pp := p
+			target = &pp
+		}
+	}
+	if target == nil || target.Name != "main" {
+		if o.Test {
+			return nil, "", fmt.Errorf("select one package with tests; no generated test main was found")
+		}
+		return nil, "", fmt.Errorf("select one main package")
+	}
+	if o.Test {
+		packages, trace, err = prepareTestSources(packages, *target, trace)
+		if err != nil {
+			return nil, "", err
+		}
+	}
+	units, err := driver.Parse(string(trace), dir)
+	if err != nil {
+		return nil, "", err
+	}
+	sources, sourceHashes, err := collectSources(packages, staging)
+	if err != nil {
+		return nil, "", err
 	}
 	paths := sourcePaths(sources)
 	toolPaths := strings.NewReplacer(ge["GOROOT"], "@GOROOT@", tc, "@TOOLCHAIN@")
@@ -374,16 +436,16 @@ func Generate(o Options) (*Graph, error) {
 		u.Script = normalizeDirectories(u.Script)
 		if u.Binary {
 			if root != "" {
-				return nil, fmt.Errorf("multiple link actions")
+				return nil, "", fmt.Errorf("multiple link actions")
 			}
 			root = u.ID
 		}
 	}
 	if root == "" {
-		return nil, fmt.Errorf("missing link action")
+		return nil, "", fmt.Errorf("missing link action")
 	}
 	if err := prepareSources(staging, units); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	binaryName := filepath.Base(target.ImportPath)
 	if target.Target != "" {
@@ -403,42 +465,7 @@ func Generate(o Options) (*Graph, error) {
 	graph.BinaryName = binaryName
 	graph.Root = root
 	graph.Units = units
-	if err = writeToolchainFiles(staging, o.GoVersion); err != nil {
-		return nil, err
-	}
-	b, err := templates.ReadFile("templates/default.nix")
-	if err != nil {
-		return nil, err
-	}
-	if err = os.WriteFile(filepath.Join(staging, "default.nix"), b, 0644); err != nil {
-		return nil, err
-	}
-	if err = os.WriteFile(filepath.Join(staging, "scripts.nix"), []byte(nixScripts(units)), 0644); err != nil {
-		return nil, err
-	}
-	b, err = json.Marshal(graph)
-	if err != nil {
-		return nil, err
-	}
-	if err = os.WriteFile(filepath.Join(staging, "graph.json"), b, 0644); err != nil {
-		return nil, err
-	}
-	if err = writeEvaluationMetadata(staging, graph); err != nil {
-		return nil, err
-	}
-	if err = writeResolvedToolchain(staging, tc); err != nil {
-		return nil, err
-	}
-	if err = os.WriteFile(filepath.Join(staging, ".drvgo"), []byte("1\n"), 0644); err != nil {
-		return nil, err
-	}
-	if err = os.RemoveAll(out); err != nil {
-		return nil, err
-	}
-	if err = os.Rename(staging, out); err != nil {
-		return nil, err
-	}
-	return graph, nil
+	return graph, tc, nil
 }
 
 func copyFile(src, dest string) error {

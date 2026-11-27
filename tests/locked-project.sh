@@ -61,6 +61,15 @@ MOD
   if [[ -n "$previous_check" ]]; then test "$previous_check" = "$checked"; fi
   previous_check=$checked
 done
+# Planning a checked-in lock only needs the resolved fetch tools and manifests.
+proxy_planner=$(nix eval "${opts[@]}" --raw ".#packages.$system.app.modules.planner.drvPath")
+nixpkgs_src=$(DRVGO_TEST_REPO="$repo" nix eval --impure --raw --expr '
+  (builtins.getFlake (builtins.getEnv "DRVGO_TEST_REPO")).inputs.nixpkgs.outPath')
+proxy_inputs=$(nix-store --query --references "$proxy_planner")
+if grep -Fxq "$nixpkgs_src" <<< "$proxy_inputs"; then
+  echo "proxy planner retained the full Nixpkgs source" >&2
+  exit 1
+fi
 # A raw checkout must use the compiler's filtered source for the test runner too.
 raw_check() {
   DRVGO_TEST_REPO="$repo" DRVGO_TEST_SRC="$work" nix eval --impure --raw --expr '

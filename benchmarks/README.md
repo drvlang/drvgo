@@ -22,3 +22,16 @@ nix run .#bench -- ci --before ../drvgo-before --after . \
 ```
 
 An independent signed-cache check restored a UUID-backed command and its upstream-style test from an empty store seeded with their recipes. Both outputs retained their content addresses with zero builders, IFD disabled, and Nix's normal substitution eligibility.
+
+## Resource-controlled CI comparison
+
+With the sibling drvkit checkout, run the same UUID client and output check under the current drvgo checkout and Nixpkgs’ `buildGoModule`.
+
+```sh
+make cibench CIBENCH_OUT="$(mktemp -d)" \
+  CIBENCH_ARGS='--cpus 4 --memory-mib 8192 --latency-ms 5 --bandwidth-mib-s 100 --upstream https://cache.nixos.org'
+```
+
+Omit `--upstream` for an empty-store run that also builds missing Nixpkgs toolchains from source. CIBench writes each timing, cache transfer, and build log to the output directory. The shared harness documents all seven cases, prerequisites and language comparisons. [CIBench in drvkit](https://github.com/drvlang/drvkit/tree/main/cibench)
+
+For before-and-after timings against `buildGoModule` across all seven cases, see the [CI optimization comparison](cibench-ci-optimizations-2026-11-27.md) and the earlier [Go module planner comparison](cibench-module-proxy-2026-11-24.md).

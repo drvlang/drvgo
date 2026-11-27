@@ -1,6 +1,7 @@
 package export
 
 import (
+	"bytes"
 	"fmt"
 	"io/fs"
 	"os"
@@ -46,6 +47,9 @@ func prepareSources(dir string, units []plan.Unit) error {
 				path := "@WORK@/sources/" + id
 				found := make(map[string]bool)
 				script, err := encoder.snapshot(root, path, func(data []byte) {
+					if !bytes.Contains(data, storePrefix) {
+						return
+					}
 					for _, match := range storeReference.FindAllIndex(data, -1) {
 						ref := string(data[match[0]:match[1]])
 						if validStoreReference(ref) {

@@ -73,8 +73,13 @@ func TestRecoverLockedArchive(t *testing.T) {
 		"--option", "allow-import-from-derivation", "false", "--option", "builders", "", "--max-jobs", "4",
 		"--argstr", "data", dir, "--expr", `
 		{ data }: let f = builtins.getFlake (toString ./.); system = builtins.currentSystem;
+		    pkgs = f.inputs.nixpkgs.legacyPackages.${system};
 		in import ./nix/module-members.nix {
-		  pkgs = f.inputs.nixpkgs.legacyPackages.${system}; drvgo = f.packages.${system}.drvgo.worker;
+		  fetch = import ./nix/module-manifest.nix {
+		    inherit system; inherit (pkgs) cacert nix;
+		    drvgo = f.packages.${system}.drvgo.worker;
+		    impureEnvVars = pkgs.lib.fetchers.proxyImpureEnvVars;
+		  };
 		  entries = data + "/entries"; members = data + "/members";
 		}`)
 	cmd.Dir = ".."

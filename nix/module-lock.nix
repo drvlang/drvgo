@@ -1,10 +1,9 @@
 # Derive the verified file-manifest inputs directly from native Go checksums.
-{ pkgs, drvgo, moduleManifest ? import ./module-manifest.nix, src, moduleProxy, source ? {
+{ lib, fetch, src, moduleProxy, source ? {
     exists = rel: builtins.pathExists (src + "/" + rel);
     readFile = rel: builtins.readFile (src + "/" + rel);
   } }:
 let
-  inherit (pkgs) lib;
   # Proxy paths escape uppercase ASCII; the signed member names retain their
   # original spelling. Go module paths cannot contain spaces or URL fragments.
   upper = lib.stringToCharacters "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -19,7 +18,7 @@ let
     proxyPath = "${escape module}/@v/${escape version}";
     url = "${lib.removeSuffix "/" moduleProxy}/${proxyPath}.${kind}";
     checksum = "h1:${digest}";
-    manifest = moduleManifest { inherit pkgs drvgo url kind checksum; };
+    manifest = fetch.manifest { inherit url kind checksum; };
   in if fields == null || !builtins.all (s: !(builtins.elem s [ "." ".." "" ])) (lib.splitString "/" module)
     || builtins.match "v[0-9][^/]*" version == null
     then throw "drvgo: invalid go.sum entry: ${line}"

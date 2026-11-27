@@ -17,6 +17,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/ryantm/drvgo/internal/nixstore"
 )
 
 type Member struct {
@@ -86,7 +88,10 @@ func Fetch(url, kind, checksum, out string, member []string) error {
 	}
 	slices.SortFunc(entries, func(a, b entry) int { return strings.Compare(a.name, b.name) })
 	var manifest strings.Builder
-	var paths []string
+	type seededFile struct {
+		path, hash string
+	}
+	var seeded []seededFile
 	var total int64
 	for i, e := range entries {
 		if strings.ContainsAny(e.name, "\r\n") || (i > 0 && entries[i-1].name == e.name) {
@@ -102,7 +107,6 @@ func Fetch(url, kind, checksum, out string, member []string) error {
 				return err
 			}
 			dest = filepath.Join(dir, "drvgo-module-file")
-			paths = append(paths, dest)
 		}
 		in, err := e.open()
 		if err != nil {
@@ -130,7 +134,9 @@ func Fetch(url, kind, checksum, out string, member []string) error {
 		if len(member) > 0 {
 			return nil
 		}
-		fmt.Fprintf(&manifest, "%x  %s\n", digest.Sum(nil), e.name)
+		hashHex := hex.EncodeToString(digest.Sum(nil))
+		seeded = append(seeded, seededFile{dest, hashHex})
+		fmt.Fprintf(&manifest, "%s  %s\n", hashHex, e.name)
 	}
 	if len(member) > 0 {
 		return fmt.Errorf("archive member %q missing", member[0])
@@ -140,12 +146,35 @@ func Fetch(url, kind, checksum, out string, member []string) error {
 	if "h1:"+base64.StdEncoding.EncodeToString(sum[:]) != checksum {
 		return fmt.Errorf("%s: go.sum checksum mismatch", url)
 	}
-	if store := os.Getenv("drvgoNixStore"); store != "" {
-		for group := range slices.Chunk(paths, 256) {
-			cmd := exec.Command(store, append([]string{"--add-fixed", "sha256"}, group...)...)
-			cmd.Stderr = os.Stderr
-			if err := cmd.Run(); err != nil {
+	if len(seeded) > 0 {
+		if remote := os.Getenv("NIX_REMOTE"); nixstore.IsUnixSocket(remote) {
+			storeDir := nixstore.StoreDir()
+			seenHash := make(map[string]bool, len(seeded))
+			files := make([]nixstore.FixedFile, 0, len(seeded))
+			for _, f := range seeded {
+				if seenHash[f.hash] {
+					continue
+				}
+				seenHash[f.hash] = true
+				files = append(files, nixstore.FixedFile{
+					StorePath: nixstore.MakeFixedOutputPath(storeDir, "drvgo-module-file", false, f.hash),
+					LocalPath: f.path,
+				})
+			}
+			if err := nixstore.AddFixedFiles(remote, "drvgo-module-file", files); err != nil {
 				return fmt.Errorf("seed fixed module files: %w", err)
+			}
+		} else if store := os.Getenv("drvgoNixStore"); store != "" {
+			paths := make([]string, len(seeded))
+			for i, f := range seeded {
+				paths[i] = f.path
+			}
+			for group := range slices.Chunk(paths, 256) {
+				cmd := exec.Command(store, append([]string{"--add-fixed", "sha256"}, group...)...)
+				cmd.Stderr = os.Stderr
+				if err := cmd.Run(); err != nil {
+					return fmt.Errorf("seed fixed module files: %w", err)
+				}
 			}
 		}
 	}

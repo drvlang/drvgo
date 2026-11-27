@@ -10,7 +10,7 @@
       systems = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
       ca = { __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256"; };
-      packageSets = forAllSystems (system: import nixpkgs { inherit system; });
+      packageSets = forAllSystems (system: nixpkgs.legacyPackages.${system});
       readSource = import (drvkit + "/source-reader.nix") nixpkgs.lib;
       discovery = { inherit (nixpkgs) lib; inherit readSource; };
       commandFlake = { commands, tests ? commands }: {
@@ -41,6 +41,7 @@
       });
       checks = forAllSystems (system: {
         inherit (self.packages.${system}) drvgo bench;
+        drvgo-tests = self.packages.${system}.drvgo.tests;
       });
       # Publish the same project as the default package on each supported system.
       lib.mkFlake = args: commandFlake { commands.default = args; };

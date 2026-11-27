@@ -31,16 +31,28 @@ let
       readSource = import (drvkit + "/source-reader.nix") lib;
       nixpkgsSource = import (drvkit + "/nixpkgs-source.nix") pkgs (toolchain.nixpkgs or null);
     };
+  # Dry-run discovery needs the driver, sources and tool-version metadata.
+  # Native compiler probes are emitted for workers to replay instead.
+  # Empty-test validation compiles packages with ordinary source files,
+  # including their cgo dependencies. Keep actual compilers available for
+  # that path. Explicitly disabling cgo avoids native tools.
+  compactPlanningToolchain = import ./planning-toolchain.nix { inherit pkgs drvgo; go = toolchain.go; };
+  planningToolchain = if allowEmptyTests then
+    (if cgoEnabled == false then toolchain.go else toolchain)
+  else
+    compactPlanningToolchain;
   # Reuse verified native dependencies across commands and source edits.
   # Hand-supplied file proxies retain their lazy extraction behavior.
   prepare = if prepareModules == null then !(lib.hasPrefix "file://" moduleProxy) else prepareModules;
   preparedModules = if moduleCache != null then moduleCache
     else if !prepare || modules == null then null
-    else import ./module-cache.nix { inherit pkgs drvgo modules; go = toolchain.go; };
+    else import ./module-cache.nix { inherit pkgs drvgo modules; go = compactPlanningToolchain; };
   # Only the recipe is needed during planning. Restore its output context in
-  # the nested evaluator, so generated packages keep the same dependencies as
-  # ordinary exports without making the planner fetch unused worker tools.
+  # the nested evaluator or direct planner, so generated packages keep the same
+  # dependencies as ordinary exports without fetching unused worker tools.
   recipe = tc: if tc ? drvPath then builtins.unsafeDiscardOutputDependency tc.drvPath else tc;
+  recipeDrv = tc: if tc ? drvPath then builtins.unsafeDiscardOutputDependency tc.drvPath else "";
+  recipeOut = tc: if tc ? drvPath then builtins.unsafeDiscardStringContext (toString tc) else tc;
   outputExpr = tc: if !(tc ? drvPath) then ''builtins.storePath "${tc}"'' else ''builtins.appendContext ${builtins.toJSON (builtins.unsafeDiscardStringContext (toString tc))} {
     ${builtins.toJSON (builtins.unsafeDiscardOutputDependency tc.drvPath)} = { outputs = [ "out" ]; };
   }'';
@@ -51,35 +63,34 @@ let
     native = ${outputExpr (toolchain.native or toolchain)};
     internalLink = ${outputExpr (toolchain.internalLink or (toolchain.native or toolchain))};
   }'';
-  # Dry-run discovery needs the driver, sources and tool-version metadata.
-  # Native compiler probes are emitted for workers to replay instead.
-  # Empty-test validation compiles packages with ordinary source files,
-  # including their cgo dependencies. Keep actual compilers available for
-  # that path. Explicitly disabling cgo avoids native tools.
-  planningToolchain = if allowEmptyTests then
-    (if cgoEnabled == false then toolchain.go else toolchain)
-  else
-    import ./planning-toolchain.nix { inherit pkgs drvgo; go = toolchain.go; };
   # Excluded test directories need go/build from the selected SDK. Share its
   # executable across planners, whose writable Go build caches start empty.
-  testSelector = pkgs.runCommand "drvgo-test-selector" { __contentAddressed = true; outputHashMode = "recursive"; outputHashAlgo = "sha256"; } ''
+  testSelector = pkgs.runCommand "drvgo-test-selector" {} ''
     export HOME="$TMPDIR" GOCACHE="$TMPDIR/cache" GOTOOLCHAIN=local CGO_ENABLED=0
     cp ${../internal/export/templates/test-selection.go} selection.go
-    ${toolchain.go or toolchain}/bin/go build -p "$NIX_BUILD_CORES" -trimpath -ldflags='-s -w' \
+    ${toolchain.go or toolchain}/bin/go build -p "$NIX_BUILD_CORES" -trimpath -gcflags='all=-dwarf=false -l' -ldflags='-s -w' \
       -o drvgo-test-selector selection.go
     install -m 0555 drvgo-test-selector "$out"
   '';
   # These wrappers only run explicit tools; a stdenv setup and its dependency
   # closure are unnecessary on the planning and final forwarding paths.
+  compileTc = toolchain.compile or toolchain;
+  linkTc = toolchain.link or toolchain;
+  nativeTc = toolchain.native or toolchain;
+  internalLinkTc = toolchain.internalLink or nativeTc;
+  # Passing a .drv by unsafeDiscardOutputDependency bind-mounts its entire
+  # transitive bootstrap .drv closure (~850 mounts) into the recursive sandbox,
+  # making every daemon store registration ~5-10x slower on Linux. Pass the
+  # compact realized worker bundles directly when they will be used, keeping
+  # the sandbox mount table tiny and letting toolchain helpers build in parallel.
+  realizeNative = cgoEnabled != false;
+  realizeInternalLink = lib.hasInfix "linkmode" ldflags;
   planner = builtins.derivation ({
     name = "${name}-planner.drv";
     system = pkgs.stdenv.hostPlatform.system;
     builder = "${drvgo}/bin/drvgo";
-    # Keep evaluator selection separate from exporter arguments so Nix can
-    # evaluate their dependencies independently.
-    plannerEvaluator = if iets == null then "${pkgs.nix}/bin/nix-instantiate" else "${iets}/bin/iets";
     args = [ "internal-plan"
-      (if iets == null then "nix" else "iets")
+      (if iets == null then "native" else "iets")
     ] ++ lib.optional experimentalGo "-experimental-go"
       ++ lib.optional test "-test"
       ++ lib.optional race "-race"
@@ -89,9 +100,7 @@ let
       ++ (if preparedModules != null then [ "-module-cache" preparedModules ]
           else [ "-module-proxy" (if modules == null then "off" else "file://${modules}") ])
       ++ [ "-tags" tags "-ldflags" ldflags package ];
-    # The exporter queries the recursive daemon directly. Only the default
-    # evaluator needs Nix's command-line tools in the planner's input closure.
-    PATH = lib.makeBinPath ([ drvgo ] ++ lib.optional (iets == null) pkgs.nix);
+    PATH = lib.makeBinPath [ drvgo ];
     # Remote build hooks do not reliably copy newly generated derivation closures.
     # Plan locally; the generated package derivations can still build remotely.
     preferLocalBuild = true;
@@ -101,14 +110,25 @@ let
     outputHashMode = "text";
     outputHashAlgo = "sha256";
     requiredSystemFeatures = [ "recursive-nix" ];
-    # Make the toolchain derivation itself available to the nested evaluator.
-    toolchainDrv = recipe toolchain;
-    compileToolchainDrv = recipe (toolchain.compile or toolchain);
-    linkToolchainDrv = recipe (toolchain.link or toolchain);
-    nativeToolchainDrv = recipe (toolchain.native or toolchain);
-    internalLinkToolchainDrv = recipe (toolchain.internalLink or (toolchain.native or toolchain));
-    drvgoDrv = builtins.unsafeDiscardOutputDependency drvgo.drvPath;
     inherit src;
+  } // (if iets == null then {
+    compileToolchainOut = compileTc;
+    linkToolchainOut = linkTc;
+    nativeToolchainOut = if realizeNative then nativeTc else recipeOut nativeTc;
+    nativeToolchainDrv = if realizeNative then "" else recipeDrv nativeTc;
+    internalLinkToolchainOut = if realizeInternalLink then internalLinkTc else "";
+    internalLinkToolchainDrv = "";
+    drvgoOut = builtins.unsafeDiscardStringContext (toString drvgo);
+    exportData = if exportData then "1" else "0";
+    resultName = "${name}-result";
+  } else {
+    toolchainDrv = recipe toolchain;
+    compileToolchainDrv = recipeDrv compileTc;
+    linkToolchainDrv = recipeDrv linkTc;
+    nativeToolchainDrv = recipeDrv nativeTc;
+    internalLinkToolchainDrv = recipeDrv internalLinkTc;
+    drvgoDrv = recipeDrv drvgo;
+    plannerEvaluator = "${iets}/bin/iets";
     passAsFile = [ "expression" ];
     # Keep the emitted recipe distinct from the text-addressed planner output.
     # A forwarding derivation supplies a stable name independent of Go import paths.
@@ -131,7 +151,7 @@ let
         args = [ "internal-symlink" command (builtins.placeholder "out") ];
       }
     '';
-  } // lib.optionalAttrs allowEmptyTests {
+  }) // lib.optionalAttrs allowEmptyTests {
     inherit testSelector;
   } // lib.optionalAttrs moduleTest {
     moduleTest = "1";
@@ -140,7 +160,7 @@ let
     # Make their data available to the restricted recursive store; the graph
     # retains only references found in each selected package or replay action.
     inherit runtimeInputs;
-    passAsFile = [ "expression" "runtimeInputs" ];
+    passAsFile = (if iets == null then [] else [ "expression" ]) ++ [ "runtimeInputs" ];
   } // lib.optionalAttrs (previousPlan != null) {
     # Make an earlier graph's closure visible to the restricted store. Source
     # discovery still runs from scratch; only identical content-addressed
